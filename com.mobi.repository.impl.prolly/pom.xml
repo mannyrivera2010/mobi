@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  #%L
+  com.mobi.repository.impl.prolly
+  $Id:$
+  $HeadURL:$
+  %%
+  Copyright (C) 2016 - 2026 iNovex Information Systems, Inc.
+  %%
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  #L%
+  -->
+
+<!--
+  ============================================================================
+  DRAFT — not yet wired into the reactor build (mobi-parent <modules>).
+  Three prerequisites must clear before this module compiles/runs in Mobi:
+
+    1. RDF4J version. prolly-rdf4j is built against rdf4j 5.1.4; Mobi pins
+       rdf4j 4.3.15 (mobi-parent). The Sail SPI changed across the 4 -> 5
+       major — Mobi must upgrade rdf4j repo-wide first.
+    2. Java 21 + Panama preview. prolly-rdf4j requires Java 21 and the JVM
+       flags --enable-preview --enable-native-access=ALL-UNNAMED. Mobi builds
+       on Java 17; the Karaf runtime needs both the JDK bump and the flags.
+    3. OSGi packaging. prolly-rdf4j / prolly-rdf / prolly-port-core are plain
+       jars, not OSGi bundles, and pull RocksDB JNI native libs. They are
+       Embed-Dependency'd below; the RocksDB .so/.dll still needs to be on
+       the Karaf native path (see Bundle-NativeCode TODO).
+
+  Until (1)-(3) are addressed this module is a reference draft only.
+  ============================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.mobi</groupId>
+        <artifactId>mobi-parent</artifactId>
+        <version>4.3.0-SNAPSHOT</version>
+        <relativePath>../mobi-parent/pom.xml</relativePath>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>repository.impl.prolly</artifactId>
+    <name>${project.groupId}.${project.artifactId}</name>
+    <packaging>bundle</packaging>
+
+    <properties>
+        <!-- prolly-rdf4j is a Java 21 + Panama-preview codebase. Overriding
+             the inherited compiler level here is necessary but NOT sufficient:
+             the parent's maven-compiler-plugin config and the surefire/Karaf
+             JVMs all need --enable-preview too. Tracked as prerequisite (2). -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <prolly.version>0.2.0-BETA</prolly.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.mobi</groupId>
+            <artifactId>persistence.api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.mobi</groupId>
+            <artifactId>persistence.utils</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>org.osgi.annotation.versioning</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>org.osgi.service.metatype.annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>org.osgi.service.component.annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>org.osgi.service.cm</artifactId>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.eclipse.rdf4j</groupId>
+            <artifactId>rdf4j-repository-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.rdf4j</groupId>
+            <artifactId>rdf4j-repository-sail</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.rdf4j</groupId>
+            <artifactId>rdf4j-sail-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
+
+        <!-- prolly-rdf4j + its substrate. These are plain jars (not bundles)
+             and are not in Mobi's dependency management — they must be
+             installed to the local repo / Nexus, or built reactor-side.
+             They are Embed-Dependency'd into this bundle below. -->
+        <dependency>
+            <groupId>com.earasoft</groupId>
+            <artifactId>prolly-rdf4j</artifactId>
+            <version>${prolly.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.earasoft</groupId>
+            <artifactId>prolly-rdf</artifactId>
+            <version>${prolly.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.dolthub</groupId>
+            <artifactId>prolly-port-core</artifactId>
+            <version>${prolly.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.spockframework</groupId>
+            <artifactId>spock-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <extensions>true</extensions>
+                <configuration>
+                    <instructions>
+                        <Bundle-SymbolicName>${project.groupId}.${project.artifactId}</Bundle-SymbolicName>
+                        <Bundle-Name>Mobi Repository Prolly Impl</Bundle-Name>
+                        <Bundle-Version>${project.version}</Bundle-Version>
+                        <Export-Package>
+                            com.mobi.repository.impl.prolly*
+                        </Export-Package>
+                        <!-- prolly jars aren't bundles: fold them in. -->
+                        <Embed-Dependency>
+                            prolly-rdf4j,prolly-rdf,prolly-port-core,rocksdbjni,flatbuffers-java
+                        </Embed-Dependency>
+                        <Embed-Transitive>true</Embed-Transitive>
+                        <!-- TODO(prereq-3): RocksDB ships a JNI .so/.dll. Either
+                             declare Bundle-NativeCode for each platform here, or
+                             extract the native lib to a Karaf-visible path at
+                             activation. The plain Embed above ships the jar but
+                             not a resolvable native binding. -->
+                        <_metatype>*</_metatype>
+                        <build>${maven.build.timestamp}</build>
+                        <_snapshot>${maven.build.timestamp}</_snapshot>
+                    </instructions>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
