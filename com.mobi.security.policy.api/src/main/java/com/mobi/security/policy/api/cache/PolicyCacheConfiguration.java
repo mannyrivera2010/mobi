@@ -28,10 +28,10 @@ import com.mobi.security.policy.api.Policy;
 import com.mobi.security.policy.api.cache.config.PolicyCacheServiceConfig;
 import org.ehcache.config.builders.CacheConfigurationBuilder;
 import org.ehcache.config.builders.CacheEventListenerConfigurationBuilder;
+import org.ehcache.config.builders.ExpiryPolicyBuilder;
 import org.ehcache.config.builders.ResourcePoolsBuilder;
 import org.ehcache.core.events.CacheEventListenerConfiguration;
 import org.ehcache.event.EventType;
-import org.ehcache.expiry.Expirations;
 import org.ehcache.jsr107.Eh107Configuration;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -81,7 +81,7 @@ public class PolicyCacheConfiguration implements CacheConfiguration {
                 .newCacheConfigurationBuilder(String.class, Policy.class,
                         ResourcePoolsBuilder.heap(numEntries))
                 .withSizeOfMaxObjectGraph(2000)
-                .withExpiry(Expirations.noExpiration())
+                .withExpiry(ExpiryPolicyBuilder.noExpiration())
                 .add(eventConfig)
                 .build());
     }

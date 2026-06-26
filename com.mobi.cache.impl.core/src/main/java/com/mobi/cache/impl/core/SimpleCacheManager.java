@@ -37,14 +37,22 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import javax.cache.Cache;
-import javax.cache.Caching;
 import javax.cache.configuration.Configuration;
 import javax.cache.spi.CachingProvider;
 
 @Component(immediate = true)
 public class SimpleCacheManager implements CacheManager {
 
-    private CachingProvider provider;
+    /**
+     * The JSR-107 {@link CachingProvider} as an OSGi service. ehcache 3.10 registers it
+     * via Declarative Services (Provide-Capability osgi.service objectClass=
+     * javax.cache.spi.CachingProvider) and no longer exposes it through the
+     * osgi.serviceloader bridge, so the old static {@code Caching.getCachingProvider(fqcn, cl)}
+     * lookup no longer resolves under OSGi. Inject the published service instead.
+     * See plans/ehcache-3.10-lock-lift.md.
+     */
+    @Reference
+    CachingProvider provider;
     private javax.cache.CacheManager cacheManager;
     private Map<String, CacheConfiguration<?, ?>> cacheConfigurations = new HashMap<>();
     private final Semaphore mutex = new Semaphore(1);
@@ -80,9 +88,8 @@ public class SimpleCacheManager implements CacheManager {
         if (cacheManager != null) {
             cacheManager.close();
         }
-        if (provider != null) {
-            provider.close();
-        }
+        // Do not close `provider` — it is an injected OSGi service owned by the ehcache
+        // bundle, not created (and so not owned) by this component.
     }
 
     @Override
@@ -93,8 +100,6 @@ public class SimpleCacheManager implements CacheManager {
     private void checkCacheManager() throws InterruptedException {
         mutex.acquire();
         if (cacheManager == null) {
-            provider = Caching.getCachingProvider("org.ehcache.jsr107.EhcacheCachingProvider",
-                    this.getClass().getClassLoader());
             cacheManager = provider.getCacheManager();
         }
         mutex.release();
