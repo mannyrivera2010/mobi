@@ -69,12 +69,12 @@
         <jaxb.version>2.3.3</jaxb.version>
         <jaxrs.version>2.0.1</jaxrs.version> <!-- Can update to 3.x Jakarta post Java 9 -->
         <jose-jwt.version>10.0.2</jose-jwt.version>
-        <junit.version>5.9.1</junit.version>
-        <karaf.version>4.4.3</karaf.version>
+        <junit.version>5.14.1</junit.version>
+        <karaf.version>4.4.11</karaf.version>
         <logback.version>1.2.13</logback.version>
         <lz4.version>1.8.0</lz4.version>
         <maven-bundle-plugin.version>5.1.4</maven-bundle-plugin.version>
-        <mockito.version>4.6.1</mockito.version>
+        <mockito.version>5.23.0</mockito.version>
         <opencsv.version>5.3</opencsv.version>
         <osgi-service-jaxrs.version>1.0.0</osgi-service-jaxrs.version>
         <osgi-service-cm.version>1.6.1</osgi-service-cm.version>
@@ -525,10 +525,21 @@
                 <version>${junit.version}</version>
                 <scope>test</scope>
             </dependency>
+            <!-- Groovy 4.0.x (via the BOM) is required for the Spock specs to
+                 compile on Java 25 (class-file v69); Groovy 3.0 tops out earlier.
+                 Coupled to spock-core's -groovy-4.0 variant and gmavenplus 3.x.
+                 See plans/java-25-upgrade.md. -->
+            <dependency>
+                <groupId>org.apache.groovy</groupId>
+                <artifactId>groovy-bom</artifactId>
+                <version>4.0.32</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.spockframework</groupId>
                 <artifactId>spock-core</artifactId>
-                <version>2.1-groovy-3.0</version>
+                <version>2.4-groovy-4.0</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
@@ -540,12 +551,6 @@
             <dependency>
                 <groupId>org.mockito</groupId>
                 <artifactId>mockito-core</artifactId>
-                <version>${mockito.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.mockito</groupId>
-                <artifactId>mockito-inline</artifactId>
                 <version>${mockito.version}</version>
                 <scope>test</scope>
             </dependency>
@@ -598,6 +603,28 @@
                     <configuration>
                         <obrRepository>NONE</obrRepository>
                     </configuration>
+                    <!-- Override the embedded bndlib (5.1.1, pre-Java-17) with a
+                         current release so bnd can parse Java 25 class files
+                         (major version 69) when <release> is raised. See
+                         plans/java-25-migration/ Step 5 / findings.md F-8.
+                         NOTE: do NOT add bnd's <_noimportjava>true</_noimportjava>
+                         here. It suppresses harmless java.* imports, but in bndlib
+                         7.3.0 it ALSO strips the substitutable self-import of
+                         exported packages (e.g. com.mobi.setting.api.ontologies.setting).
+                         Without that self-import, Felix's bundle classloader returns
+                         null for the bundle's root resources (the *.rq SPARQL files)
+                         during the boot/activation transient, so the static{} blocks
+                         that do Objects.requireNonNull(getResourceAsStream(".rq"))
+                         throw ExceptionInInitializerError and ~21 backend DS services
+                         die. Importing java.* is harmless (the system bundle always
+                         provides it via boot delegation), so we leave imports alone. -->
+                    <dependencies>
+                        <dependency>
+                            <groupId>biz.aQute.bnd</groupId>
+                            <artifactId>biz.aQute.bndlib</artifactId>
+                            <version>7.3.0</version>
+                        </dependency>
+                    </dependencies>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -638,7 +665,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.0</version>
+                <version>3.13.0</version>
                 <configuration>
                     <release>17</release>
                 </configuration>
@@ -653,12 +680,12 @@
             <plugin>
                 <groupId>org.codehaus.gmavenplus</groupId>
                 <artifactId>gmavenplus-plugin</artifactId>
-                <version>1.4</version>
+                <version>3.0.2</version>
                 <executions>
                     <execution>
                         <goals>
                             <goal>compile</goal>
-                            <goal>testCompile</goal>
+                            <goal>compileTests</goal>
                         </goals>
                     </execution>
                 </executions>
@@ -666,7 +693,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.22.2</version>
+                <version>3.2.5</version>
                 <configuration>
                     <useFile>false</useFile>
                     <trimStackTrace>false</trimStackTrace>
@@ -684,7 +711,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>2.22.2</version>
+                <version>3.2.5</version>
                 <configuration>
                     <skipTests>${skipITs}</skipTests>
                     <trimStackTrace>false</trimStackTrace>
@@ -778,7 +805,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>3.4.1</version>
                 <executions>
                     <execution>
                         <id>enforce-java</id>

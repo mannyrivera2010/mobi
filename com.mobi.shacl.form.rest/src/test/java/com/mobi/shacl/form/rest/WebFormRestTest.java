@@ -113,7 +113,7 @@ public class WebFormRestTest extends MobiRestTestCXF {
 
     @Before
     public void setup() {
-        MockitoAnnotations.initMocks(this);
+        MockitoAnnotations.openMocks(this);
         when(configProvider.getRepository()).thenReturn(mock(OsgiRepository.class));
         when(configProvider.getRepository().getConnection()).thenReturn(mockConnection);
 

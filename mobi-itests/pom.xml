@@ -114,9 +114,26 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <!-- Was pinned at 2.11.0, which predates BoundedInputStream.builder(); the
+                 itests also pull commons-compress 1.27.1, whose GzipCompressorInputStream
+                 calls that builder() on the test classpath -> NoSuchMethodError before
+                 any container boots. Align with the reactor commons-io (2.18.0). See
+                 plans/java-25-migration/findings.md F-11. -->
             <groupId>commons-io</groupId>
             <artifactId>commons-io</artifactId>
-            <version>2.11.0</version>
+            <version>${commons-io.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Pax-Exam's ArchiveExtractor unpacks the distribution tar.gz with
+                 commons-compress 1.27.1, whose TarArchiveEntry references
+                 org.apache.commons.lang3.SystemProperties (commons-lang3 >= 3.13). The
+                 reactor pins commons-lang3 3.12.0, so the container can't even be
+                 extracted -> NoClassDefFoundError before boot. Pull a >=3.13 commons-lang3
+                 onto the itests test classpath. See plans/java-25-migration/findings.md F-11. -->
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.18.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -89,7 +89,22 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-plugin-plugin</artifactId>
-                <version>3.6.4</version>
+                <version>3.15.1</version>
+                <dependencies>
+                    <!-- Override ASM so the @Mojo descriptor scanner can read
+                         Java 25 (class-file v69) classes; plugin-tools 3.15.1
+                         bundles an older ASM. See plans/java-25-upgrade.md. -->
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm</artifactId>
+                        <version>9.10.1</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm-commons</artifactId>
+                        <version>9.10.1</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
     </build>

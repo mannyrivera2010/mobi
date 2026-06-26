@@ -158,6 +158,55 @@
                 </executions>
             </plugin>
             <plugin>
+                <!-- Defect A fix (plans/java-25-migration findings.md F-9): the
+                     org.apache.aries.javax.jax.rs-api bundle embeds a 2018
+                     lib/geronimo-osgi-locator.jar whose ZIP central directory carries a
+                     non-standard extra field (tag 0xbfef) that hardened JDK ZipFile
+                     validation rejects ("Invalid CEN header"), breaking the OSGi SPI
+                     locator. We keep this bundle (it uniquely provides the
+                     osgi.contract=JavaJAXRS capability the jax-rs whiteboard needs) and
+                     rezip only its embedded jar cleanly, in the staged assembly, after
+                     karaf:assembly (process-resources) and before karaf:archive
+                     (package). The outer bundle is rebuilt with <jar> preserving its
+                     existing MANIFEST (Bundle-SymbolicName, Provide-Capability, etc.). -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>rezip-jaxrs-embedded-locator</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <property name="ariesJar" value="${project.build.directory}/assembly/system/org/apache/aries/spec/org.apache.aries.javax.jax.rs-api/1.0.1/org.apache.aries.javax.jax.rs-api-1.0.1.jar"/>
+                                <property name="work" value="${project.build.directory}/jaxrs-rezip"/>
+                                <fail message="Defect-A rezip: aries jax-rs-api bundle not found at ${ariesJar}">
+                                    <condition>
+                                        <not><available file="${ariesJar}"/></not>
+                                    </condition>
+                                </fail>
+                                <delete dir="${work}"/>
+                                <mkdir dir="${work}/outer"/>
+                                <unzip src="${ariesJar}" dest="${work}/outer"/>
+                                <mkdir dir="${work}/emb"/>
+                                <unzip src="${work}/outer/lib/geronimo-osgi-locator.jar" dest="${work}/emb"/>
+                                <delete file="${work}/outer/lib/geronimo-osgi-locator.jar"/>
+                                <!-- rezip the embedded jar cleanly (drops the 0xbfef extra field) -->
+                                <zip destfile="${work}/outer/lib/geronimo-osgi-locator.jar" basedir="${work}/emb"/>
+                                <!-- rebuild the outer bundle preserving its original manifest -->
+                                <delete file="${ariesJar}"/>
+                                <jar destfile="${ariesJar}" manifest="${work}/outer/META-INF/MANIFEST.MF">
+                                    <fileset dir="${work}/outer" excludes="META-INF/MANIFEST.MF"/>
+                                </jar>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
