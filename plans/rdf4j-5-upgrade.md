@@ -19,6 +19,15 @@ concrete driver (a needed 5.x feature, a security advisory, or 4.x end-of-life) 
 25** — 4.3.15 builds and unit-tests clean on JDK 25 (java-25 findings.md F-1), so this is
 not on the Java-25 critical path.
 
+> **Status note (2026-06-26):** still `proposed` / gated on a driver — the upgrade is
+> NOT started. But the **Phase-0 spike (Step 2) was completed** as de-risking
+> groundwork (see its wrap-up below). Key result: the real 4→5 break surface is **far
+> narrower than the 454-file import count** — it concentrates in a handful of
+> rdf4j-*extension* classes (the `CloseableIteration` generics change;
+> `ReadOnlyRepositoryConnection` breaks first) plus mechanical exception-handling
+> cleanup, while **19 core modules compiled clean against rdf4j 5.1.4**. This lowers the
+> estimated cost and should inform the go/no-go.
+
 ## Goal
 
 `mobi-parent` pins `rdf4j.version = 5.x`, the full reactor compiles and the unit suite
@@ -56,9 +65,11 @@ Snapshot from ADR-0003 (2026-06-04) + a 2026-06 re-grep; re-anchor before resumi
   `-repository-api`/`-http`/`-sail`, `-sail-memory`, `-runtime-osgi`, … — `:107`+).
 - **The OWL API coupling:** `owlapi.version 5.5.0` (`:89`) with
   `owlapi.rdf4j.version 4.2.0` (`:90`) — the skew D-2 must reconcile.
-- **Blast radius:** ~454 files import `org.eclipse.rdf4j` across **76 / 88 modules**
-  (ADR-0003). A 2026-06 grep of `com.mobi.*` main sources alone returns **376** files —
-  re-measure at the start (the number anchors the effort, and it rots).
+- **Blast radius — import count ≠ break surface (Step-2 spike):** ~454 files *import*
+  `org.eclipse.rdf4j` across **76 / 88 modules** (ADR-0003; ~269 in `com.mobi.*` main
+  sources, 2026-06). But the spike showed the *break* surface is much smaller: 19 core
+  modules compiled clean against 5.1.4, and breaks concentrate in rdf4j-extension classes
+  + exception handling (see Step 2). Re-measure both at the start.
 - **API-visible:** `com.mobi.persistence.api/src/main/java/com/mobi/repository/api/OsgiRepository.java:26`
   — `OsgiRepository extends org.eclipse.rdf4j.repository.Repository` (D-4).
 - **OSGi wiring:** the `rdf4j-deps` feature
@@ -74,10 +85,63 @@ Snapshot from ADR-0003 (2026-06-04) + a 2026-06 re-grep; re-anchor before resumi
   feature / security advisory / EOL, or the embedded-prolly choice) in this plan's lead,
   and re-measure the blast radius (`grep -rl org.eclipse.rdf4j` across modules). **Gate:**
   a named driver + a current file/module count.
-- [ ] **Step 2.** Spike the 4→5 breaking surface on a throwaway branch: enumerate the
+- [x] **Step 2.** Spike the 4→5 breaking surface on a throwaway branch: enumerate the
   removed/renamed APIs Mobi actually uses (especially the **Sail SPI** change called out
   in the embedded-prolly draft) and the OWL API options for D-2. **Gate:** a written list
   of break categories with a rough per-category fix count.
+
+  *(Done 2026-06-26 — spike only, no upgrade committed; the version flip was reverted, the
+  branch is clean. Done ahead of the gate as de-risking groundwork; the upgrade proper
+  remains gated on Step 1's driver.)*
+
+  > **Spike findings — the headline 5.0 break, and the blast radius is far smaller than
+  > the import count suggests.**
+  >
+  > **The dominant 4→5 break (verified by `javap`):** `CloseableIteration` lost its
+  > checked-exception type parameter and the `Iteration` interface was removed —
+  > 4.3.15 `CloseableIteration<E, X extends Exception> extends Iteration<E, X>` (with
+  > `close() throws X`) → 5.1.4 `CloseableIteration<E> extends java.util.Iterator<E>`
+  > (`close()` throws nothing). So every two-type-param `CloseableIteration<…,…>` /
+  > `Iteration<…>` reference, and every method **override** whose signature embedded the
+  > old form, breaks.
+  >
+  > **Measured exposure (grep of `com.mobi.*` main sources):** **0** files use
+  > `CloseableIteration` directly, **1** uses the removed bare `Iteration<…>`,
+  > `Iterations.` helper 1, `RepositoryResult` 25, `TupleQueryResult`/`GraphQueryResult`/
+  > `QueryResults` 58 — but those result types stayed single-parameter, so most *usage*
+  > survives; only now-unchecked exception handling and overrides break. ~**269** main
+  > files import `org.eclipse.rdf4j` (vs ADR-0003's 454 incl. tests).
+  >
+  > **Scratch compile against rdf4j 5.1.4** (`mvn clean compile -fae`, reverted):
+  > **19 modules compiled CLEAN** — including the core `com.mobi.api`,
+  > `com.mobi.persistence.api`, `com.mobi.cache*`, `com.mobi.security*`,
+  > `com.mobi.semantic.service`, `com.mobi.server*`, `com.mobi.owlapi.utils`. The first
+  > break is **`com.mobi.persistence.utils/src/main/java/com/mobi/persistence/utils/ReadOnlyRepositoryConnection.java`** (extends
+  > rdf4j's `RepositoryConnectionWrapper`): `cannot find symbol` + **"name clash … same
+  > erasure … neither overrides"** on its `add`/`remove`/`getStatements` overrides — i.e.
+  > exactly the `CloseableIteration` signature change. (`-fae` then skipped 87 dependents
+  > of this foundational module, so this is a *first-wave* count, not the total.)
+  >
+  > **Break categories + rough sizing:**
+  > 1. **rdf4j-extension classes** (the real work): types that *extend* rdf4j base
+  >    classes — `RepositoryConnectionWrapper` (`ReadOnlyRepositoryConnection`), any
+  >    `*SailWrapper`/`NotifyingSail`, custom iterations — and override changed-signature
+  >    methods. Small set (single digits to low tens), but foundational (they gate
+  >    dependents). **This is where the effort is.**
+  > 2. **Checked-exception handling** around `RepositoryResult`/query-result iteration
+  >    (`catch (RepositoryException|QueryEvaluationException)` that no longer apply) — a
+  >    subset of the 25 + 58 files; mechanical fixes.
+  > 3. **The vast majority** of the 269 rdf4j files use stable model/value/consumption
+  >    APIs (`IRI`, `Statement`, `ValueFactory`, `Model`, `RepositoryConnection` calls) —
+  >    **no break**, confirmed by the 19 clean modules.
+  > 4. **OWL API (D-2):** unchanged by this spike — still needs reconciling (owlapi 5.5.0
+  >    pulls rdf4j 4.2.0); a runtime/resolution concern, not a Mobi-code compile break.
+  >
+  > **Conclusion:** the 4→5 upgrade is **narrower than the 454-file import count implies**
+  > — concentrated in a handful of rdf4j-*extension* classes (`ReadOnlyRepositoryConnection`
+  > first) plus mechanical exception-handling cleanup, not a pervasive rewrite. The full
+  > count needs the iterative Phase-1 fix (fix the foundational extension classes →
+  > recompile → next wave), which is the upgrade itself. **Still gated on Step 1's driver.**
 
 ## Phase 1 — Property bump + compilation
 
