@@ -50,7 +50,7 @@ what was measured, what surprised, what's refuted).
 | ↳ Defect A (embedded `geronimo-osgi-locator.jar` bad ZIP extra field) | ✅ fixed (committed) | build-time antrun rezip in `mobi-distribution/pom.xml` keeps the aries bundle (JavaJAXRS contract) + clean embedded jar → CEN errors 0 (F-9). aries→jakarta swap tried & reverted (lost the contract) |
 | `log4j.api` 2.17.1 → 2.25.4 (vs pax-logging 2.3.3) | ✅ fixed | realigned to pax-logging's log4j 2.25.4 → `SimpleProvider` NCDFE gone, boot reaches `BootFinished` (F-11) |
 | **Pax-Exam IT gate (all 5 modules)** | 🟢 green except shell paths | on JDK 25: orm, platform, vfs fully green; rest green except `UserRestIT`; etl fails only in `executeCommand` setup. **Every failure is F-12** (Karaf shell `getSubject`); all non-shell ITs pass. Fixed to get here: log4j 2.25.4 + 2 test-classpath skews (commons-io, commons-lang3) |
-| **Karaf shell/CLI on JDK 24+** (`Subject.getSubject`) | ❌ hard upstream limit | JEP 486: `Subject.getSubject` throws on JDK 24+; Karaf 4.4.11 shell uses it at **4 call sites across 2 bundles** → shell/console/CLI (and `utils.cli`, `bin/client`, gogo) broken on JDK 25 (F-12). REST/boot unaffected. Carry-patch validated but **impractical** (forks 2 Karaf bundles, whack-a-mole); needs upstream `Subject.current()` or JDK ≤21 for CLI |
+| **Karaf shell/CLI on JDK 24+** (`Subject.getSubject`) | ❌ hard upstream limit | JEP 486: `Subject.getSubject` throws on JDK 24+; Karaf 4.4.11 uses it across its JAAS layer (**~8 classes / 7 bundles** -- shell, JMX, jaas commands) → shell/console/CLI (and `utils.cli`, `bin/client`, gogo) broken on JDK 25 (F-12). REST/boot unaffected. Carry-patch validated but **impractical** (forks ~8 classes across 7 Karaf bundles); needs upstream `Subject.current()` or JDK ≤21 for CLI |
 | `jre.properties` sync (jre-19…jre-26) | ✅ done | synced from stock 4.4.11, Mobi customizations preserved; `jre-25 = ${jre-24}, javax.sound` |
 | **Boot on JDK 25** | ✅ proven | distribution boots + serves on JDK 25.0.3: SPA 200, REST alive, clinit 0, **0 UnsupportedClassVersion / 0 module-access errors** (F-10) — the ADR-0004 load-bearing test |
 | **v69 (release 25) build + boot on JDK 25** | ✅ proven | temp `<release>`→25 (reverted): units green on 25 (build reached the web gate), **v69 distribution booted on JDK 25** — Mobi-compiled-for-25 runs on 25 (F-10) |
@@ -106,7 +106,7 @@ Step 5's `_noimportjava`, now removed from `mobi-parent/pom.xml` (F-8).
 
 **Decide how to handle the Karaf-shell-on-JDK-25 limitation (F-12) — confirmed not
 fixable in-tree.** A carry-patch was validated and shown impractical: `Subject.getSubject`
-has **4 call sites across 2 Karaf shell bundles**, so patching diverges Mobi from
+spans ~8 classes across 7 Karaf bundles (the JAAS layer: shell + JMX + jaas commands), so patching diverges Mobi from
 upstream (whack-a-mole). Realistic choices: **(a)** wait for an upstream Karaf shell fix
 (`Subject.current()`) — a 4.4.x patch or 4.5.x GA; or **(c)** accept that admin CLI /
 `bin/client` / `utils.cli` run on JDK ≤21 until upstream lands, while the REST runtime is

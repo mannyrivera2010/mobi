@@ -346,12 +346,25 @@ the one class still runs on JDK 17 where `current()` is absent — falls back to
 re-ran `itests-rest`. Result: the patch **works** — that call site's error is gone — but
 the failure simply **moves to the next `getSubject` call site**:
 `org.apache.karaf.shell.impl.console.osgi.secured.SecuredSessionFactoryImpl.currentUserHasRole`
-(shell.console). A bytecode scan finds **4 `Subject.getSubject` call sites across 2
-bundles** (`shell.core` ×2, `shell.console` ×2). So option (b) means **forking two
-Karaf bundles and patching all four sites** — impractical whack-a-mole that diverges Mobi
-from upstream Karaf. **Conclusion: option (b) is not worth it; the realistic paths are
-(a) upstream fix or (c) JDK ≤21 for CLI.** The `.m2` injection was reverted (validation
-only); nothing patched is committed. *(Aside: in that run `CatalogRestIT.testUpdateInProgressCommit`
+(shell.console). **Correction (2026-06-26): the surface is wider than "4 sites in 2
+bundles" — that count was from scanning only the shell bundles.** A full bytecode scan of
+all booted Karaf bundles for the JEP-486-affected `Subject` APIs finds the break is in
+Karaf's whole **JAAS-integration layer**, not just the shell:
+- `Subject.getSubject` (throws on JDK 24+): `org.apache.karaf.util.jaas.JaasHelper` —
+  a shared util **replicated into 6 bundles** (`bundle.core`, `jaas.command`,
+  `management.server`, `shell.console`, `shell.core`, `shell.ssh`) — plus
+  `shell.support.ShellUtil` (shell.core), `shell.util.ShellUtil` (shell.console),
+  `SecuredSessionFactoryImpl` (shell.core), `SecuredCommandProcessorImpl` (shell.console),
+  `jaas.command.WhoamiCommand`, and `management.internal.BulkRequestContext`.
+- `Subject.doAs` (also throws on JDK 24+): `jaas.modules.ldap.GSSAPILdapLoginModule`.
+
+So it is **~8 distinct classes across 7 bundles** (JaasHelper replicated 6×), and it
+breaks not only the shell/console/CLI but also **JMX management auth** (`management.server`)
+and the **`jaas:*` commands**. Option (b) therefore means forking Karaf's JAAS layer
+across 7 bundles — real, ongoing maintenance debt, re-verified each Karaf bump. **Conclusion:
+option (b) is not worth it; the realistic paths are (a) the upstream fix
+(`Subject.current()`/`callAs`) or (c) JDK ≤21 for the shell/JMX/CLI paths while REST runs
+on 25.** The `.m2` injection was reverted (validation only); nothing patched is committed. *(Aside: in that run `CatalogRestIT.testUpdateInProgressCommit`
 flaked `201 vs 400` — it passed in the prior run and is unrelated to the shell; the
 REST IT suite has some order/timing-dependent state. Needs a rerun to confirm, not a
 known regression.)*

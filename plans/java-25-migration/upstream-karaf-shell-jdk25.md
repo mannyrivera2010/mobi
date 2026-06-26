@@ -5,7 +5,7 @@
 
 ## Title
 
-Shell/console unusable on JDK 24+: `ShellUtil.getCurrentUserName` (and 3 other sites)
+Shell/console unusable on JDK 24+: Karaf JAAS layer (`JaasHelper`/`ShellUtil`/JMX, ~8 classes / 7 bundles)
 call `Subject.getSubject`, which throws `UnsupportedOperationException` after JEP 486
 
 ## Affected / environment
@@ -47,22 +47,37 @@ Practical impact: `bin/client`, the SSH Gogo console, and headless/programmatic 
 execution are all unusable on JDK 24+. (The OSGi runtime, HTTP/REST, and non-shell
 features are unaffected.)
 
-## All call sites (bytecode scan of the 4.4.11 shell bundles)
+## All call sites (bytecode scan of the booted 4.4.11 bundles)
 
-`Subject.getSubject` is invoked from **4 classes across 2 bundles** — fixing one is not
-enough:
+The break spans Karaf's whole **JAAS-integration layer**, not just the shell — `~8
+distinct classes across 7 bundles` use the JEP-486-affected `Subject` APIs (fixing one
+is not enough). `Subject.getSubject` (throws on JDK 24+):
 
 | Bundle | Class |
 |---|---|
-| `org.apache.karaf.shell.core` | `org.apache.karaf.shell.support.ShellUtil` (`getCurrentUserName`) |
-| `org.apache.karaf.shell.core` | `org.apache.karaf.shell.impl.console.osgi.secured.SecuredSessionFactoryImpl` (`currentUserHasRole`) |
-| `org.apache.karaf.shell.console` | `org.apache.karaf.shell.util.ShellUtil` |
-| `org.apache.karaf.shell.console` | `org.apache.karaf.shell.security.impl.SecuredCommandProcessorImpl` |
+| `bundle.core`, `jaas.command`, `management.server`, `shell.console`, `shell.core`, `shell.ssh` | `org.apache.karaf.util.jaas.JaasHelper` (shared util, **replicated into all 6**) |
+| `shell.core` | `org.apache.karaf.shell.support.ShellUtil` (`getCurrentUserName`) |
+| `shell.core` | `org.apache.karaf.shell.impl.console.osgi.secured.SecuredSessionFactoryImpl` (`currentUserHasRole`) |
+| `shell.console` | `org.apache.karaf.shell.util.ShellUtil` |
+| `shell.console` | `org.apache.karaf.shell.security.impl.SecuredCommandProcessorImpl` |
+| `jaas.command` | `org.apache.karaf.jaas.command.WhoamiCommand` |
+| `management.server` | `org.apache.karaf.management.internal.BulkRequestContext` (JMX auth) |
+
+And `Subject.doAs` (also throws on JDK 24+):
+
+| Bundle | Class |
+|---|---|
+| `jaas.modules` | `org.apache.karaf.jaas.modules.ldap.GSSAPILdapLoginModule` |
+
+So the impact is broader than the interactive shell: **JMX management auth** and the
+**`jaas:*` commands** break too. A Mobi-side carry-patch would mean forking the JAAS
+layer across 7 bundles — which is why the fix belongs upstream.
 
 ## Suggested fix
 
 Replace `Subject.getSubject(AccessController.getContext())` with `Subject.current()` at
-all four sites. To keep the bundles runnable on JDK 17 (where `Subject.current()` does
+all the sites in the table above (and `Subject.doAs` → `Subject.callAs` in the GSSAPI
+module). To keep the bundles runnable on JDK 17 (where `Subject.current()` does
 not exist), guard with reflection or a multi-release class:
 
 ```java
@@ -80,7 +95,7 @@ private static Subject currentSubject() {
 ```
 
 (Verified locally: this single change makes the *first* site work on JDK 25 and the
-error moves to the next site — confirming all four must be changed.)
+error moves to the next site — confirming the whole JAAS layer must be changed.)
 
 ## Reproduction
 
@@ -94,5 +109,5 @@ error moves to the next site — confirming all four must be changed.)
 Until an upstream fix lands (a 4.4.x patch or 4.5.x GA), run admin CLI / `bin/client` /
 `com.mobi.utils.cli` operations on **JDK ≤ 21**, while the REST runtime runs on JDK 25.
 A local carry-patch (forking the two shell bundles) was validated but rejected as
-impractical (4 sites, 2 bundles, ongoing divergence from upstream) — see
+impractical (~8 classes across 7 bundles -- the JAAS layer, ongoing divergence from upstream) — see
 [findings.md](findings.md) F-12.

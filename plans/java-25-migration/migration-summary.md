@@ -78,7 +78,7 @@ browser), which this work does not include.
 ## Known limitation (not fixable in-tree) — F-12
 
 Karaf 4.4.11's **shell/console/CLI** is broken on **JDK 24+**: `Subject.getSubject` was
-removed by JEP 486 and the shell calls it at **4 sites across 2 bundles**. This breaks
+removed by JEP 486 and it spans ~8 classes across 7 bundles (Karaf's JAAS layer: shell, JMX, jaas commands). This breaks
 `bin/client`, the Gogo console, and `com.mobi.utils.cli` (backup/restore/migration) on
 JDK 25 — **REST/boot are unaffected**. A carry-patch was validated but rejected as
 impractical. **Disposition:** run admin CLI on **JDK ≤ 21** while the REST runtime runs
