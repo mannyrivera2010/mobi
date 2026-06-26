@@ -31,6 +31,33 @@ A plan moves through states, recorded in its frontmatter `status`:
 > step against the *current* code and confirm it is still needed, still accurate
 > (paths/classes it names still exist), and unblocked.
 
+### Keep active plans few and independent
+
+Drift is cross-invalidation between active plans over shared code — an active
+plan's *What's there already* anchoring and its Decisions describe the codebase as
+it was when the plan went active, so any *other* active plan over the same code can
+quietly invalidate them. Bound it two ways:
+
+- **Minimize active plans (a work-in-progress limit).** Finish before you start —
+  drive one plan to `complete` before marking another `active`; pull work to done,
+  don't push new work in. Target **one actively-driven plan**; treat **> 3 active**
+  as a stop-starting signal (`dev-scripts/plan_status.py` prints the active count
+  and its work-in-progress warnings). A `proposed` plan does not count against the
+  limit — it has written no code, so it drifts no branches.
+- **Keep concurrent active plans independent.** When more than one must be active
+  at once, they need **disjoint blast radius** — and the **`epic` frontmatter is
+  the blast-radius proxy**: plans in the *same* epic almost certainly share surface,
+  so serialize them (or declare an explicit dependency); plans in *different* epics
+  are safe to drive in parallel. Scope new plans small and module-scoped, with an
+  explicit *Out of scope*, so independence is engineered up front — not discovered
+  in a merge conflict.
+- **Defer with a reason and a resume gate — a bare `deferred` rots.** When you park
+  started work, write into the plan's lead: (a) **why** it was deferred, (b) **safe
+  to resume when** — the condition that must hold plus the one or two things to
+  re-verify at resume (so the re-anchor is targeted, not a full re-read), and (c)
+  any **resume trap** and the test that proves it is avoided. The reason is the
+  credible artifact, the way a retraction is.
+
 ## Plan shape
 
 Copy [`_TEMPLATE.md`](_TEMPLATE.md). Every plan has:
@@ -59,6 +86,9 @@ correction in the wrap-up so the plan's evolution stays visible.
 | [prolly-tree-storage-backend-evaluation](prolly-tree-storage-backend-evaluation.md) | proposed | cross-cutting |
 | [out-of-process-prolly-service](out-of-process-prolly-service.md) | active | cross-cutting |
 | [grpc-prolly-versioning-client](grpc-prolly-versioning-client.md) | proposed | cross-cutting |
+| [java-25-migration](java-25-migration/README.md) | active | cross-cutting |
+| [ehcache-3.10-lock-lift](ehcache-3.10-lock-lift.md) | complete | cross-cutting |
+| [rdf4j-5-upgrade](rdf4j-5-upgrade.md) | proposed | cross-cutting |
 
 ## Where this lives
 
