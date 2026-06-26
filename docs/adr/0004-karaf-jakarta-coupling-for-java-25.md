@@ -113,10 +113,13 @@ Karaf 4.5 / `javax`→`jakarta` migration once 4.5.0 is GA. Depends on
 
 ## Where this lives
 
-- `mobi-parent/pom.xml` — `<release>` (`:643`), enforcer (`:790-792`), Karaf
-  (`:73`), the JDK-sensitive plugin/library versions.
-- `mobi-distribution/src/main/resources/etc/jre.properties` — the JavaSE profiles
-  to sync from Karaf 4.4.11 (`:517-525`, stop at `jre-18` today).
+- `mobi-parent/pom.xml` — `<release>` (`:670`), enforcer (`:817-819`), Karaf
+  (`:73`), the JDK-sensitive plugin/library versions. (The `<release>`/enforcer line
+  numbers shifted from the originally-cited `:643`/`:790-792` when the bndlib
+  `<dependencies>` override block was inserted above them.)
+- `mobi-distribution/src/main/resources/etc/jre.properties` — the JavaSE profiles,
+  now synced from Karaf 4.4.11: `jre-19`…`jre-26` were added (`:526-540`), so the
+  file no longer stops at `jre-18` (`:525`) as it did when this ADR was first written.
 - `mobi-itests/` — the Pax-Exam boot gate that validates JDK 25 on pax-web 8.
 - Serves: [`plans/java-25-migration/implementation-plan.md`](../../plans/java-25-migration/implementation-plan.md); relates to
   [ADR-0003](0003-rdf4j-4-to-5-upgrade.md).

@@ -93,7 +93,7 @@
                 <dependencies>
                     <!-- Override ASM so the @Mojo descriptor scanner can read
                          Java 25 (class-file v69) classes; plugin-tools 3.15.1
-                         bundles an older ASM. See plans/java-25-upgrade.md. -->
+                         bundles an older ASM. See plans/java-25-migration/. -->
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>

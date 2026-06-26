@@ -528,7 +528,7 @@
             <!-- Groovy 4.0.x (via the BOM) is required for the Spock specs to
                  compile on Java 25 (class-file v69); Groovy 3.0 tops out earlier.
                  Coupled to spock-core's -groovy-4.0 variant and gmavenplus 3.x.
-                 See plans/java-25-upgrade.md. -->
+                 See plans/java-25-migration/. -->
             <dependency>
                 <groupId>org.apache.groovy</groupId>
                 <artifactId>groovy-bom</artifactId>

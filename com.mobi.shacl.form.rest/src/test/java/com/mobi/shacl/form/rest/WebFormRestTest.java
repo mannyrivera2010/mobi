@@ -58,6 +58,7 @@ import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.TupleQuery;
 import org.eclipse.rdf4j.query.TupleQueryResult;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -80,6 +81,7 @@ public class WebFormRestTest extends MobiRestTestCXF {
     private String propertyShapeWithSparql;
     private String propertyShape;
     private String focusNode;
+    private AutoCloseable mockCloseable;
 
     @Mock
     private RepositoryConnection mockConnection;
@@ -111,9 +113,16 @@ public class WebFormRestTest extends MobiRestTestCXF {
         configureServer(rest, new com.mobi.rest.test.util.UsernameTestFilter());
     }
 
+    @After
+    public void closeMocks() throws Exception {
+        if (mockCloseable != null) {
+            mockCloseable.close();
+        }
+    }
+
     @Before
     public void setup() {
-        MockitoAnnotations.openMocks(this);
+        mockCloseable = MockitoAnnotations.openMocks(this);
         when(configProvider.getRepository()).thenReturn(mock(OsgiRepository.class));
         when(configProvider.getRepository().getConnection()).thenReturn(mockConnection);
 

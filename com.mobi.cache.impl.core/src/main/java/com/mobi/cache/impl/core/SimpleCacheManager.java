@@ -99,9 +99,14 @@ public class SimpleCacheManager implements CacheManager {
 
     private void checkCacheManager() throws InterruptedException {
         mutex.acquire();
-        if (cacheManager == null) {
-            cacheManager = provider.getCacheManager();
+        try {
+            if (cacheManager == null) {
+                cacheManager = provider.getCacheManager();
+            }
+        } finally {
+            // Release in finally so a throwing provider.getCacheManager() cannot leak the
+            // permit and wedge a subsequent activation retry on mutex.acquire().
+            mutex.release();
         }
-        mutex.release();
     }
 }
