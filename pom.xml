@@ -27,7 +27,7 @@
 
     <groupId>com.mobi</groupId>
     <artifactId>root</artifactId>
-    <version>4.3.0-SNAPSHOT</version>
+    <version>4.5.0-SNAPSHOT</version>
 
     <packaging>pom</packaging>
 
@@ -125,6 +125,9 @@
         <module>com.mobi.workflows.impl.core</module>
         <module>com.mobi.workflows.impl.dagu</module>
         <module>com.mobi.workflows.rest</module>
+        <module>com.mobi.webhooks.api</module>
+        <module>com.mobi.webhooks.impl</module>
+        <module>com.mobi.webhooks.rest</module>
         <module>com.mobi.shacl.form.rest</module>
         <module>com.mobi.sse</module>
         <module>com.mobi.versionedrdf.api</module>

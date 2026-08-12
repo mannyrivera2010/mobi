@@ -45,6 +45,7 @@ describe('Mapping Manager service', function () {
   let policyEnforcementStub: jasmine.SpyObj<PolicyEnforcementService>;
 
   const error = 'Error Message';
+  const errorObject = { error: '', errorMessage: 'Error Message', errorDetails: [] };
   const recordId = 'http://mobi.com/records/test';
   let mappingStub: jasmine.SpyObj<Mapping>;
   const emptyObj: JSONLDObject = { '@id': 'test' };
@@ -107,11 +108,11 @@ describe('Mapping Manager service', function () {
     it('unless an error occurs', function () {
       service.upload(this.recordConfig, [])
         .subscribe(() => fail('Observable should have errored'), response => {
-          expect(response).toBe(error);
+          expect(response).toEqual(errorObject);
         });
       const request = httpMock.expectOne({ url: this.url, method: 'POST' });
       expect(request.request.body instanceof FormData).toBeTrue();
-      request.flush('flush', { status: 400, statusText: error });
+      request.flush({ errorMessage: error }, { status: 400, statusText: error });
     });
     it('successfully', function () {
       service.upload(this.recordConfig, [])
@@ -134,10 +135,10 @@ describe('Mapping Manager service', function () {
     it('unless an error occurs', function () {
       service.getMapping(recordId)
         .subscribe(() => fail('Observable should have errored'), response => {
-          expect(response).toBe(error);
+          expect(response).toEqual(errorObject);
         });
       const request = httpMock.expectOne({ url: this.url, method: 'GET' });
-      request.flush('flush', { status: 400, statusText: error });
+      request.flush({ errorMessage: error }, { status: 400, statusText: error });
     });
     it('successfully', function () {
       service.getMapping(recordId)
@@ -204,10 +205,10 @@ describe('Mapping Manager service', function () {
     it('unless an error occurs', function () {
       service.deleteMapping(recordId)
         .subscribe(() => fail('Observable should have errored'), response => {
-          expect(response).toBe(error);
+          expect(response).toEqual(errorObject);
         });
       const request = httpMock.expectOne({ url: this.url, method: 'DELETE' });
-      request.flush('flush', { status: 400, statusText: error });
+      request.flush({ errorMessage: error }, { status: 400, statusText: error });
     });
     it('successfully', function () {
       service.deleteMapping(recordId)
@@ -225,16 +226,28 @@ describe('Mapping Manager service', function () {
   });
   describe('should set the IRI template of a class mapping', function () {
     it('unless it does not exist in the mapping', function () {
-      service.editIriTemplate(mappingStub, 'classId', 'test/', '${0}');
+      service.editIriTemplate(mappingStub, 'classId', 'test/${0}');
       expect(mappingStub.getClassMapping).toHaveBeenCalledWith('classId');
     });
-    it('successfully', function () {
-      const classMapping = Object.assign({}, emptyObj);
-      mappingStub.getClassMapping.and.returnValue(classMapping);
-      service.editIriTemplate(mappingStub, 'classId', 'test/', '${0}');
-      expect(mappingStub.getClassMapping).toHaveBeenCalledWith('classId');
-      expect(classMapping[`${DELIM}hasPrefix`]).toEqual([{ '@value': 'test/' }]);
-      expect(classMapping[`${DELIM}localName`]).toEqual([{ '@value': '${0}' }]);
+    describe('successfully', () => {
+      it('if hasPrefix and localName exists', () => {
+        const classMapping = Object.assign({}, emptyObj);
+        classMapping[`${DELIM}hasPrefix`] = [{ '@value': 'old/' }];
+        classMapping[`${DELIM}localName`] = [{ '@value': '${UUID}' }];
+        mappingStub.getClassMapping.and.returnValue(classMapping);
+        service.editIriTemplate(mappingStub, 'classId', 'test/${0}');
+        expect(mappingStub.getClassMapping).toHaveBeenCalledWith('classId');
+        expect(classMapping[`${DELIM}iriTemplate`]).toEqual([{ '@value': 'test/${0}' }]);
+        expect(classMapping[`${DELIM}hasPrefix`]).toBeUndefined();
+        expect(classMapping[`${DELIM}localName`]).toBeUndefined();
+      });
+      it('if hasPrefix and localName do not exist', () => {
+        const classMapping = Object.assign({}, emptyObj);
+        mappingStub.getClassMapping.and.returnValue(classMapping);
+        service.editIriTemplate(mappingStub, 'classId', 'test/${0}');
+        expect(mappingStub.getClassMapping).toHaveBeenCalledWith('classId');
+        expect(classMapping[`${DELIM}iriTemplate`]).toEqual([{ '@value': 'test/${0}' }]);
+      });
     });
   });
   it('should test whether a mapping entity is a class mapping', function () {

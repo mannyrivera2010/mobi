@@ -68,7 +68,6 @@ import com.mobi.repository.api.RepositoryManager;
 import com.mobi.repository.impl.core.SimpleRepositoryManager;
 import com.mobi.setting.api.SettingService;
 import com.mobi.setting.api.ontologies.setting.ApplicationSetting;
-import com.mobi.vocabularies.xsd.XSD;
 import org.apache.commons.io.IOUtils;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Model;
@@ -80,6 +79,7 @@ import org.eclipse.rdf4j.model.vocabulary.OWL;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.model.vocabulary.RDFS;
 import org.eclipse.rdf4j.model.vocabulary.SKOS;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 import org.eclipse.rdf4j.query.Binding;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryResults;
@@ -272,7 +272,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         when(importsResolver.retrieveOntologyLocalFileFromCommitIRI(ont2HeadCommitIRI)).thenReturn(ont2File);
 
         Model dctModel = createModelFromFile("/dcterms.rdf");
-        dctModel.add(vf.createIRI("urn:generatedIRI"), vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ONTOLOGY.stringValue()));
+        dctModel.add(vf.createIRI("urn:generatedIRI"), RDF.TYPE, OWL.ONTOLOGY);
         File dctFile = setupOntologyMocks(dctModel);
         IRI dctermsIRI = vf.createIRI("http://purl.org/dc/terms/");
         Ontology dcterms = new SimpleOntology(dctermsIRI, dctFile, repo, ontologyManager, catalogConfigProvider, dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
@@ -371,7 +371,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Model deletions = mf.createEmptyModel();
         IRI owlClass = vf.createIRI("http://test.com/ontology1#TestClassE");
-        deletions.add(owlClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
+        deletions.add(owlClass, RDF.TYPE, OWL.CLASS);
 
         SimpleOntology simpleOntology = (SimpleOntology) ontology;
         simpleOntology.setDifference(createDifference(null, deletions));
@@ -403,7 +403,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Model deletions = mf.createEmptyModel();
         IRI owlClass = vf.createIRI("http://mobi.com/ontology/only-declared#ClassC");
-        deletions.add(owlClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
+        deletions.add(owlClass, RDF.TYPE, OWL.CLASS);
 
         SimpleOntology simpleOnlyDeclared = (SimpleOntology) onlyDeclared;
         simpleOnlyDeclared.setDifference(createDifference(null, deletions));
@@ -433,7 +433,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Model deletions = mf.createEmptyModel();
         IRI owlClass = vf.createIRI("http://mobi.com/ontology/test-local-imports-1#Class1");
-        deletions.add(owlClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
+        deletions.add(owlClass, RDF.TYPE, OWL.CLASS);
 
         SimpleOntology simpleOnt1 = (SimpleOntology) ont1;
         simpleOnt1.setDifference(createDifference(null, deletions));
@@ -464,7 +464,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Model deletions = mf.createEmptyModel();
         IRI prop = vf.createIRI("http://test.com/ontology1#testObjectProperty2");
-        deletions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
+        deletions.add(prop, RDF.TYPE, OWL.OBJECTPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(null, deletions));
@@ -489,7 +489,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedProps = Collections.singleton(prop.stringValue());
 
         Model additions = mf.createEmptyModel();
-        additions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
+        additions.add(prop, RDF.TYPE, OWL.OBJECTPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) onlyDeclared;
         ont.setDifference(createDifference(additions, null));
@@ -514,7 +514,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedProps = Collections.singleton(prop.stringValue());
 
         Model additions = mf.createEmptyModel();
-        additions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
+        additions.add(prop, RDF.TYPE, OWL.OBJECTPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ont1;
         ont.setDifference(createDifference(additions, null));
@@ -545,7 +545,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Model deletions = mf.createEmptyModel();
         IRI prop = vf.createIRI("http://test.com/ontology1#testDataProperty2");
-        deletions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
+        deletions.add(prop, RDF.TYPE, OWL.DATATYPEPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(null, deletions));
@@ -570,7 +570,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedProps = Collections.singleton(prop.stringValue());
 
         Model additions = mf.createEmptyModel();
-        additions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
+        additions.add(prop, RDF.TYPE, OWL.DATATYPEPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) onlyDeclared;
         ont.setDifference(createDifference(additions, null));
@@ -595,7 +595,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedProps = Collections.singleton(prop.stringValue());
 
         Model additions = mf.createEmptyModel();
-        additions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
+        additions.add(prop, RDF.TYPE, OWL.DATATYPEPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ont1;
         ont.setDifference(createDifference(additions, null));
@@ -626,7 +626,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Model additions = mf.createEmptyModel();
         IRI prop = vf.createIRI("http://test.com/ontology1#testAnnotation2");
-        additions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ANNOTATIONPROPERTY.stringValue()));
+        additions.add(prop, RDF.TYPE, OWL.ANNOTATIONPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -651,7 +651,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedProps = Collections.singleton(prop.stringValue());
 
         Model additions = mf.createEmptyModel();
-        additions.add(prop, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ANNOTATIONPROPERTY.stringValue()));
+        additions.add(prop, RDF.TYPE, OWL.ANNOTATIONPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ont1;
         ont.setDifference(createDifference(additions, null));
@@ -670,7 +670,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     @Test
     public void getDataPropertyWithDifferenceTest() throws Exception {
         Model deletions = mf.createEmptyModel();
-        deletions.add(dataProp1IRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
+        deletions.add(dataProp1IRI, RDF.TYPE, OWL.DATATYPEPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(null, deletions));
@@ -692,7 +692,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         Set<Resource> ranges = ontology.getDataPropertyRange(dataProperty);
         assertEquals(1, ranges.size());
-        assertTrue(ranges.contains(vf.createIRI(XSD.INTEGER)));
+        assertTrue(ranges.contains(XSD.INTEGER));
     }
 
     @Test
@@ -701,16 +701,16 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         DataProperty dataProperty = new SimpleDataProperty(dataProp1IRI);
 
         Model deletions = mf.createEmptyModel();
-        deletions.add(dataProp1IRI, vf.createIRI(RDFS.RANGE.stringValue()), vf.createIRI(XSD.INTEGER));
+        deletions.add(dataProp1IRI, RDFS.RANGE, XSD.INTEGER);
         Model additions = mf.createEmptyModel();
-        additions.add(dataProp1IRI, vf.createIRI(RDFS.RANGE.stringValue()), vf.createIRI(XSD.DATE));
+        additions.add(dataProp1IRI, RDFS.RANGE, XSD.DATE);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, deletions));
 
         Set<Resource> ranges = ont.getDataPropertyRange(dataProperty);
         assertEquals(1, ranges.size());
-        assertTrue(ranges.contains(vf.createIRI(XSD.DATE)));
+        assertTrue(ranges.contains(XSD.DATE));
     }
 
     @Test
@@ -739,7 +739,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     @Test
     public void getObjectPropertyWithDifferenceTest() throws Exception {
         Model deletions = mf.createEmptyModel();
-        deletions.add(objectProp1IRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
+        deletions.add(objectProp1IRI, RDF.TYPE, OWL.OBJECTPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(null, deletions));
@@ -770,9 +770,9 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         ObjectProperty objectProperty = new SimpleObjectProperty(objectProp1IRI);
 
         Model deletions = mf.createEmptyModel();
-        deletions.add(objectProp1IRI, vf.createIRI(RDFS.RANGE.stringValue()), classIRI);
+        deletions.add(objectProp1IRI, RDFS.RANGE, classIRI);
         Model additions = mf.createEmptyModel();
-        additions.add(objectProp1IRI, vf.createIRI(RDFS.RANGE.stringValue()), classIRIC);
+        additions.add(objectProp1IRI, RDFS.RANGE, classIRIC);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, deletions));
@@ -821,7 +821,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedIndividuals = Stream.of("http://test.com/ontology1#IndividualD").collect(Collectors.toSet());
 
         Model deletions = mf.createEmptyModel();
-        deletions.add(individualA, vf.createIRI(RDF.TYPE.stringValue()), classIRI);
+        deletions.add(individualA, RDF.TYPE, classIRI);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(null, deletions));
@@ -849,7 +849,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedIndividuals = Stream.of("http://mobi.com/ontology/only-declared#ConceptA", "http://mobi.com/ontology/only-declared#ConceptC").collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(conceptC, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(SKOS.CONCEPT.stringValue()));
+        additions.add(conceptC, RDF.TYPE, SKOS.CONCEPT);
 
         SimpleOntology ont = (SimpleOntology) onlyDeclared;
         ont.setDifference(createDifference(additions, null));
@@ -879,7 +879,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedIndividuals = Stream.of("http://test.com/ontology1#IndividualA", "http://test.com/ontology1#IndividualNew").collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(vf.createIRI("http://test.com/ontology1#IndividualNew"), vf.createIRI(RDF.TYPE.stringValue()), classIRI);
+        additions.add(vf.createIRI("http://test.com/ontology1#IndividualNew"), RDF.TYPE, classIRI);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -908,7 +908,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         // Setup:
         Set<String> expectedIndividuals = Stream.of("http://mobi.com/ontology/only-declared#ConceptA").collect(Collectors.toSet());
 
-        Set<Individual> individuals = onlyDeclared.getIndividualsOfType(vf.createIRI(SKOS.CONCEPT.stringValue()));
+        Set<Individual> individuals = onlyDeclared.getIndividualsOfType(SKOS.CONCEPT);
         assertEquals(expectedIndividuals.size(), individuals.size());
         individuals.stream()
                 .map(individual -> individual.getIRI().stringValue())
@@ -935,7 +935,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<String> expectedIndividuals = Stream.of("http://test.com/ontology1#IndividualA", "http://test.com/ontology1#IndividualNew").collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(vf.createIRI("http://test.com/ontology1#IndividualNew"), vf.createIRI(RDF.TYPE.stringValue()), classIRI);
+        additions.add(vf.createIRI("http://test.com/ontology1#IndividualNew"), RDF.TYPE, classIRI);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -963,7 +963,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     @Test
     public void getIndividualsOfTypeDeclaredTest() throws Exception {
         // Setup:
-        OClass clazz = new SimpleClass(vf.createIRI(SKOS.CONCEPT.stringValue()));
+        OClass clazz = new SimpleClass(SKOS.CONCEPT);
         Set<String> expectedIndividuals = Stream.of("http://mobi.com/ontology/only-declared#ConceptA").collect(Collectors.toSet());
 
         Set<Individual> individuals = onlyDeclared.getIndividualsOfType(clazz);
@@ -981,7 +981,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     @Test
     public void containsClassWithDifferenceTest() {
         Model additions = mf.createEmptyModel();
-        additions.add(vf.createIRI("http://test.com/ontology1#NewClass"), vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
+        additions.add(vf.createIRI("http://test.com/ontology1#NewClass"), RDF.TYPE, OWL.CLASS);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -1006,8 +1006,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void getAllClassObjectPropertiesWithDifferenceTest() throws Exception {
         Model additions = mf.createEmptyModel();
         IRI objectProp = vf.createIRI("http://test.com/ontology1#objectPropNew");
-        additions.add(objectProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
-        additions.add(objectProp, vf.createIRI(RDFS.DOMAIN.stringValue()), classIRI);
+        additions.add(objectProp, RDF.TYPE, OWL.OBJECTPROPERTY);
+        additions.add(objectProp, RDFS.DOMAIN, classIRI);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -1037,7 +1037,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void getAllNoDomainObjectPropertiesWithDifferenceTest() {
         Model additions = mf.createEmptyModel();
         IRI objectProp = vf.createIRI("http://test.com/ontology1#objectPropNew");
-        additions.add(objectProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
+        additions.add(objectProp, RDF.TYPE, OWL.OBJECTPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -1062,8 +1062,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void getAllClassDataPropertiesWithDifferenceTest() throws Exception {
         Model additions = mf.createEmptyModel();
         IRI dataProp = vf.createIRI("http://test.com/ontology1#dataPropNew");
-        additions.add(dataProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
-        additions.add(dataProp, vf.createIRI(RDFS.DOMAIN.stringValue()), classIRI);
+        additions.add(dataProp, RDF.TYPE, OWL.DATATYPEPROPERTY);
+        additions.add(dataProp, RDFS.DOMAIN, classIRI);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -1094,7 +1094,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void getAllNoDomainDataPropertiesWithDifferenceTest() {
         Model additions = mf.createEmptyModel();
         IRI dataProp = vf.createIRI("http://test.com/ontology1#dataPropNew");
-        additions.add(dataProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
+        additions.add(dataProp, RDF.TYPE, OWL.DATATYPEPROPERTY);
 
         SimpleOntology ont = (SimpleOntology) ontology;
         ont.setDifference(createDifference(additions, null));
@@ -1139,6 +1139,37 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
                     removeWhitespace(jsonld.replaceAll("_:[a-zA-Z0-9]+\"", "\"").replaceAll("_:genid-[a-zA-Z0-9]+-[a-z]", "")));
         }
         verify(blankNodeService, times(0)).skolemize(any(org.eclipse.rdf4j.model.Model.class));
+    }
+
+    @Test
+    public void asTurtleContainsStandardPrefixesTest() {
+        String result = new String(ontology.asTurtle().toByteArray());
+        assertTrue(result.contains("@prefix owl:"));
+        assertTrue(result.contains("@prefix rdf:"));
+        assertTrue(result.contains("@prefix rdfs:"));
+        assertTrue(result.contains("@prefix dct:"));
+        assertTrue(result.contains("@prefix dc:"));
+        assertTrue(result.contains("@prefix skos:"));
+        assertTrue(result.contains("@prefix sh:"));
+    }
+
+    @Test
+    public void asRdfXmlContainsStandardPrefixesTest() {
+        String result = new String(ontology.asRdfXml().toByteArray());
+        assertTrue(result.contains("xmlns:owl="));
+        assertTrue(result.contains("xmlns:rdf="));
+        assertTrue(result.contains("xmlns:rdfs="));
+        assertTrue(result.contains("xmlns:dct="));
+        assertTrue(result.contains("xmlns:dc="));
+        assertTrue(result.contains("xmlns:skos="));
+        assertTrue(result.contains("xmlns:sh="));
+    }
+
+    @Test
+    public void asJsonLDDoesNotContainStandardPrefixesTest() {
+        String result = new String(ontology.asJsonLD(false).toByteArray());
+        assertFalse(result.contains("\"owl\":"));
+        assertFalse(result.contains("\"sh\":"));
     }
 
     @Test
@@ -1207,8 +1238,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newClass.stringValue(), Collections.singleton("http://mobi.com/ontology#Class1a"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
-        additions.add(newClass, vf.createIRI(RDFS.SUBCLASSOF.stringValue()), vf.createIRI("http://mobi.com/ontology#Class1a"));
+        additions.add(newClass, RDF.TYPE, OWL.CLASS);
+        additions.add(newClass, RDFS.SUBCLASSOF, vf.createIRI("http://mobi.com/ontology#Class1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1244,8 +1275,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<IRI> expected = Stream.of(vf.createIRI("http://mobi.com/ontology#Class1b"), vf.createIRI("http://mobi.com/ontology#Class1c"), newClass).collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(newClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
-        additions.add(newClass, vf.createIRI(RDFS.SUBCLASSOF.stringValue()), vf.createIRI("http://mobi.com/ontology#Class1a"));
+        additions.add(newClass, RDF.TYPE, OWL.CLASS);
+        additions.add(newClass, RDFS.SUBCLASSOF, vf.createIRI("http://mobi.com/ontology#Class1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1271,8 +1302,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<IRI> expected = Stream.of(vf.createIRI("http://mobi.com/ontology#Class3a"), newClass).collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(newClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
-        additions.add(newClass, vf.createIRI(OWL.DEPRECATED.stringValue()), vf.createLiteral(true));
+        additions.add(newClass, RDF.TYPE, OWL.CLASS);
+        additions.add(newClass, OWL.DEPRECATED, vf.createLiteral(true));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1319,8 +1350,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newProp.stringValue(), Collections.singleton("http://mobi.com/ontology#dataProperty1a"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()));
-        additions.add(newProp, vf.createIRI(RDFS.SUBPROPERTYOF.stringValue()), vf.createIRI("http://mobi.com/ontology#dataProperty1a"));
+        additions.add(newProp, RDF.TYPE, OWL.DATATYPEPROPERTY);
+        additions.add(newProp, RDFS.SUBPROPERTYOF, vf.createIRI("http://mobi.com/ontology#dataProperty1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1376,8 +1407,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newProp.stringValue(), Collections.singleton("http://mobi.com/ontology#annotationProperty1a"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ANNOTATIONPROPERTY.stringValue()));
-        additions.add(newProp, vf.createIRI(RDFS.SUBPROPERTYOF.stringValue()), vf.createIRI("http://mobi.com/ontology#annotationProperty1a"));
+        additions.add(newProp, RDF.TYPE, OWL.ANNOTATIONPROPERTY);
+        additions.add(newProp, RDFS.SUBPROPERTYOF, vf.createIRI("http://mobi.com/ontology#annotationProperty1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1433,8 +1464,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newProp.stringValue(), Collections.singleton("http://mobi.com/ontology#objectProperty1a"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()));
-        additions.add(newProp, vf.createIRI(RDFS.SUBPROPERTYOF.stringValue()), vf.createIRI("http://mobi.com/ontology#objectProperty1a"));
+        additions.add(newProp, RDF.TYPE, OWL.OBJECTPROPERTY);
+        additions.add(newProp, RDFS.SUBPROPERTYOF, vf.createIRI("http://mobi.com/ontology#objectProperty1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1470,8 +1501,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<IRI> expected = Stream.of(vf.createIRI("http://mobi.com/ontology#annotationProperty1b"), newProp).collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(newProp, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ANNOTATIONPROPERTY.stringValue()));
-        additions.add(newProp, vf.createIRI(RDFS.SUBPROPERTYOF.stringValue()), vf.createIRI("http://mobi.com/ontology#annotationProperty1a"));
+        additions.add(newProp, RDF.TYPE, OWL.ANNOTATIONPROPERTY);
+        additions.add(newProp, RDFS.SUBPROPERTYOF, vf.createIRI("http://mobi.com/ontology#annotationProperty1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1542,7 +1573,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newIndividual.stringValue(), Collections.singleton("http://mobi.com/ontology#Class1a"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newIndividual, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI("http://mobi.com/ontology#Class1a"));
+        additions.add(newIndividual, RDF.TYPE, vf.createIRI("http://mobi.com/ontology#Class1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1597,7 +1628,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
                 "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://www.w3.org/1999/02/22-rdf-syntax-ns#type").collect(Collectors.toList());
 
         Model additions = mf.createEmptyModel();
-        additions.add(newIndividual, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI("http://mobi.com/ontology#Class1a"));
+        additions.add(newIndividual, RDF.TYPE, vf.createIRI("http://mobi.com/ontology#Class1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1651,7 +1682,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
                 .collect(Collectors.toSet()));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newIndividual, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI("http://mobi.com/ontology#Class1a"));
+        additions.add(newIndividual, RDF.TYPE, vf.createIRI("http://mobi.com/ontology#Class1a"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1701,8 +1732,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newIndividual.stringValue(), Collections.singleton("https://mobi.com/vocabulary#Concept1"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newIndividual, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(SKOS.CONCEPT.stringValue()));
-        additions.add(newIndividual, vf.createIRI(SKOS.BROADER.stringValue()), vf.createIRI("https://mobi.com/vocabulary#Concept1"));
+        additions.add(newIndividual, RDF.TYPE, SKOS.CONCEPT);
+        additions.add(newIndividual, SKOS.BROADER, vf.createIRI("https://mobi.com/vocabulary#Concept1"));
 
         SimpleOntology ont = (SimpleOntology) queryVocabulary;
         ont.setDifference(createDifference(additions, null));
@@ -1785,8 +1816,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         expectedChildMap.put(newIndividual.stringValue(), Collections.singleton("https://mobi.com/vocabulary#ConceptScheme1"));
 
         Model additions = mf.createEmptyModel();
-        additions.add(newIndividual, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(SKOS.CONCEPT.stringValue()));
-        additions.add(newIndividual, vf.createIRI(SKOS.IN_SCHEME.stringValue()), vf.createIRI("https://mobi.com/vocabulary#ConceptScheme1"));
+        additions.add(newIndividual, RDF.TYPE, SKOS.CONCEPT);
+        additions.add(newIndividual, SKOS.IN_SCHEME, vf.createIRI("https://mobi.com/vocabulary#ConceptScheme1"));
 
         SimpleOntology ont = (SimpleOntology) queryVocabulary;
         ont.setDifference(createDifference(additions, null));
@@ -1832,8 +1863,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
                 newClass.stringValue()).collect(Collectors.toSet());
 
         Model additions = mf.createEmptyModel();
-        additions.add(newClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
-        additions.add(newClass, vf.createIRI(DC.TITLE.stringValue()), vf.createLiteral("ClassNew"));
+        additions.add(newClass, RDF.TYPE, OWL.CLASS);
+        additions.add(newClass, DC.TITLE, vf.createLiteral("ClassNew"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1859,8 +1890,8 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void testGetTupleQueryResultsWithDifference() throws Exception {
         IRI newClass = vf.createIRI("http://test.com/ontology1#ClassNew");
         Model additions = mf.createEmptyModel();
-        additions.add(newClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
-        additions.add(newClass, vf.createIRI(DC.TITLE.stringValue()), vf.createLiteral("ClassNew"));
+        additions.add(newClass, RDF.TYPE, OWL.CLASS);
+        additions.add(newClass, DC.TITLE, vf.createLiteral("ClassNew"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1934,11 +1965,34 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     }
 
     @Test
+    public void testGetGraphQueryResultsStreamTurtleContainsPrefixes() throws Exception {
+        OutputStream stream = queryOntology.getGraphQueryResultsStream(
+                "construct {?s ?p ?o} where { ?s ?p ?o . }", true, RDFFormat.TURTLE, false);
+        String result = stream.toString();
+        assertTrue(result.contains("@prefix owl:"));
+        assertTrue(result.contains("@prefix rdf:"));
+        assertTrue(result.contains("@prefix rdfs:"));
+        assertTrue(result.contains("@prefix dct:"));
+        assertTrue(result.contains("@prefix dc:"));
+        assertTrue(result.contains("@prefix skos:"));
+        assertTrue(result.contains("@prefix sh:"));
+    }
+
+    @Test
+    public void testGetGraphQueryResultsStreamJsonLdDoesNotContainPrefixes() throws Exception {
+        OutputStream stream = queryOntology.getGraphQueryResultsStream(
+                "construct {?s ?p ?o} where { ?s ?p ?o . }", true, RDFFormat.JSONLD, false);
+        String result = stream.toString();
+        assertFalse(result.contains("\"owl\":"));
+        assertFalse(result.contains("\"sh\":"));
+    }
+
+    @Test
     public void testGetGraphQueryResultsWithDifference() throws Exception {
         IRI newClass = vf.createIRI("http://test.com/ontology1#ClassNew");
         Model additions = mf.createEmptyModel();
-        additions.add(newClass, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.CLASS.stringValue()));
-        additions.add(newClass, vf.createIRI(DC.TITLE.stringValue()), vf.createLiteral("ClassNew"));
+        additions.add(newClass, RDF.TYPE, OWL.CLASS);
+        additions.add(newClass, DC.TITLE, vf.createLiteral("ClassNew"));
 
         SimpleOntology ont = (SimpleOntology) queryOntology;
         ont.setDifference(createDifference(additions, null));
@@ -1952,12 +2006,12 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void addImportLocalTest() throws Exception {
         IRI ontIRI = vf.createIRI("http://mobi.com/ontology/ont");
         Model model = mf.createEmptyModel();
-        model.add(ontIRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ONTOLOGY.stringValue()));
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
         File file = setupOntologyMocks(model);
         SimpleOntology ontology = new SimpleOntology(ontIRI, file, repo, ontologyManager, catalogConfigProvider, dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
 
         Model additionsModel = mf.createEmptyModel();
-        additionsModel.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), TEST_LOCAL_IMPORT_3);
+        additionsModel.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_3);
         ontology.setDifference(createDifference(additionsModel, null));
 
         Set<IRI> importsClosureIRIs = ontology.getImportsClosure()
@@ -1975,12 +2029,12 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void addImportWebTest() throws Exception {
         IRI ontIRI = vf.createIRI("http://mobi.com/ontology/ont");
         Model model = mf.createEmptyModel();
-        model.add(ontIRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ONTOLOGY.stringValue()));
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
         File file = setupOntologyMocks(model);
         SimpleOntology ontology = new SimpleOntology(ontIRI, file, repo, ontologyManager, catalogConfigProvider, dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
 
         Model additionsModel = mf.createEmptyModel();
-        additionsModel.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), skosIRI);
+        additionsModel.add(ontIRI, OWL.IMPORTS, skosIRI);
         ontology.setDifference(createDifference(additionsModel, null));
 
         Set<IRI> importsClosureIRIs = ontology.getImportsClosure()
@@ -2001,12 +2055,12 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         IRI ontIRI = vf.createIRI("http://mobi.com/ontology/ont");
         Model model = mf.createEmptyModel();
-        model.add(ontIRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ONTOLOGY.stringValue()));
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
         File file = setupOntologyMocks(model);
         SimpleOntology ontology = new SimpleOntology(ontIRI, file, repo, ontologyManager, catalogConfigProvider, dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
 
         Model additionsModel = mf.createEmptyModel();
-        additionsModel.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), vf.createIRI("urn:unresolvable"));
+        additionsModel.add(ontIRI, OWL.IMPORTS, vf.createIRI("urn:unresolvable"));
         ontology.setDifference(createDifference(additionsModel, null));
 
         Set<IRI> importsClosureIRIs = ontology.getImportsClosure()
@@ -2026,7 +2080,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
 
         SimpleOntology ont1Simple = (SimpleOntology) ont1;
         Model deletionsModel = mf.createEmptyModel();
-        deletionsModel.add(TEST_LOCAL_IMPORT_1, vf.createIRI(OWL.IMPORTS.stringValue()), TEST_LOCAL_IMPORT_2);
+        deletionsModel.add(TEST_LOCAL_IMPORT_1, OWL.IMPORTS, TEST_LOCAL_IMPORT_2);
         ont1Simple.setDifference(createDifference(null, deletionsModel));
 
         assertEquals(1, ont1Simple.getImportsClosure().size());
@@ -2036,9 +2090,9 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void transitiveRemovalDirectImportThatIsAlsoTransitiveTest() throws Exception {
         IRI ontIRI = vf.createIRI("http://mobi.com/ontology/transitive");
         Model model = mf.createEmptyModel();
-        model.add(ontIRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ONTOLOGY.stringValue()));
-        model.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), TEST_LOCAL_IMPORT_1);
-        model.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), TEST_LOCAL_IMPORT_2);
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
+        model.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_1);
+        model.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_2);
         File file = setupOntologyMocks(model);
         SimpleOntology transitive = new SimpleOntology(ontIRI, file, repo, ontologyManager, catalogConfigProvider, dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
 
@@ -2055,7 +2109,7 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         assertEquals(Collections.emptySet(), transitive.getUnloadableImportIRIs());
 
         Model deletionsModel = mf.createEmptyModel();
-        deletionsModel.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), TEST_LOCAL_IMPORT_2);
+        deletionsModel.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_2);
         transitive.setDifference(createDifference(null, deletionsModel));
 
         importsClosureIRIs = transitive.getImportsClosure()
@@ -2075,14 +2129,14 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
     public void transitiveAdditionTest() throws Exception {
         IRI ontIRI = vf.createIRI("http://mobi.com/ontology/transitiveAddition");
         Model model = mf.createEmptyModel();
-        model.add(ontIRI, vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ONTOLOGY.stringValue()));
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
         File transAddFile = setupOntologyMocks(model);
         SimpleOntology transitiveAdd = new SimpleOntology(ontIRI, transAddFile, repo, ontologyManager, catalogConfigProvider, dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
 
         assertEquals(1, transitiveAdd.getImportsClosure().size());
 
         Model additionsModel = mf.createEmptyModel();
-        additionsModel.add(ontIRI, vf.createIRI(OWL.IMPORTS.stringValue()), TEST_LOCAL_IMPORT_1);
+        additionsModel.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_1);
         transitiveAdd.setDifference(createDifference(additionsModel, null));
 
         assertEquals(4, transitiveAdd.getImportsClosure().size());
@@ -2109,6 +2163,86 @@ public class SimpleOntologyTest extends OrmEnabledTestCase {
         Set<IRI> diffActualUnresolved = multUnresolved1.getUnloadableImportIRIs();
         assertEquals(diffExpectedUnresolved.size(), diffActualUnresolved.size());
         assertEquals(diffExpectedUnresolved, diffActualUnresolved);
+    }
+
+    @Test
+    public void removeInvalidImportOnBranchTest() throws Exception {
+        // Simulate a branch scenario: ontologyIRI is in the catalog (importsResolver returns a record IRI),
+        // but the branch dataset uses a different commit than master. Without the fix, removeImports rebuilds
+        // default named graphs using master's SdNg, causing getImportsClosure to return a master copy instead
+        // of `this`.
+        IRI ontIRI = vf.createIRI("http://mobi.com/ontology/branchOnt");
+        IRI invalidImport = vf.createIRI("urn:invalidImport");
+        IRI recordIRI = vf.createIRI("urn:branchOntRecord");
+        IRI branchHeadCommit = vf.createIRI("urn:branchHeadCommit");
+        IRI masterHeadCommit = vf.createIRI("urn:masterHeadCommit");
+
+        // Branch commit key (different from master)
+        String branchKey = OntologyDatasets.createRecordKey(recordIRI, branchHeadCommit);
+
+        // Make the ontology appear in the catalog so getDatasetIRI returns master's dataset IRI
+        MasterBranch masterBranch = mock(MasterBranch.class);
+        when(branchManager.getMasterBranch(any(Resource.class), eq(recordIRI), any(RepositoryConnection.class))).thenReturn(masterBranch);
+        when(commitManager.getHeadCommitIRI(masterBranch)).thenReturn(masterHeadCommit);
+        when(importsResolver.getRecordIRIFromOntologyIRI(ontIRI)).thenReturn(Optional.of(recordIRI));
+
+        // Invalid import is unresolvable
+        when(importsResolver.retrieveOntologyLocalFile(invalidImport)).thenReturn(Optional.empty());
+        when(importsResolver.retrieveOntologyFromWebFile(invalidImport)).thenReturn(Optional.empty());
+
+        Model model = mf.createEmptyModel();
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
+        model.add(ontIRI, OWL.IMPORTS, invalidImport);
+        File file = setupOntologyMocks(model);
+
+        SimpleOntology branchOnt = new SimpleOntology(branchKey, file, repo, ontologyManager, catalogConfigProvider,
+                dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
+
+        // Verify initial state: 1 ontology in closure, invalid import is unloadable
+        assertEquals(1, branchOnt.getImportsClosure().size());
+        assertEquals(Collections.singleton(invalidImport), branchOnt.getUnloadableImportIRIs());
+
+        // Remove the invalid import via diff
+        Model deletions = mf.createEmptyModel();
+        deletions.add(ontIRI, OWL.IMPORTS, invalidImport);
+        branchOnt.setDifference(createDifference(null, deletions));
+
+        Set<Ontology> closure = branchOnt.getImportsClosure();
+        assertEquals(1, closure.size());
+        // The closure must contain `this` (branchOnt itself), not a newly-created master copy
+        assertTrue("getImportsClosure returned a master copy instead of the branch ontology",
+                closure.stream().anyMatch(o -> o == branchOnt));
+    }
+
+    @Test
+    public void removeValidImportWithRemainingUnresolvedTest() throws Exception {
+        // When a valid import is removed but an unresolvable import remains, getUnloadableImportIRIs should
+        // still return the remaining unresolvable import. Without the fix, the pre-existing unresolved import
+        // is stripped from the `unresolved` set and not re-added to UNRESOLVED_IRI_STRING.
+        IRI ontIRI = vf.createIRI("http://mobi.com/ontology/mixedImports");
+        IRI invalidImport = vf.createIRI("urn:invalidImport");
+
+        when(importsResolver.retrieveOntologyLocalFile(invalidImport)).thenReturn(Optional.empty());
+        when(importsResolver.retrieveOntologyFromWebFile(invalidImport)).thenReturn(Optional.empty());
+
+        Model model = mf.createEmptyModel();
+        model.add(ontIRI, RDF.TYPE, OWL.ONTOLOGY);
+        model.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_3);
+        model.add(ontIRI, OWL.IMPORTS, invalidImport);
+        File file = setupOntologyMocks(model);
+        SimpleOntology ontology = new SimpleOntology(ontIRI, file, repo, ontologyManager, catalogConfigProvider,
+                dsUtilsService, importsResolver, bNodeService, branchManager, commitManager);
+
+        // Verify initial state
+        assertEquals(Collections.singleton(invalidImport), ontology.getUnloadableImportIRIs());
+
+        // Remove only the valid import; the invalid one remains
+        Model deletions = mf.createEmptyModel();
+        deletions.add(ontIRI, OWL.IMPORTS, TEST_LOCAL_IMPORT_3);
+        ontology.setDifference(createDifference(null, deletions));
+
+        assertEquals("Remaining unresolvable import should still be reported after removing a valid import",
+                Collections.singleton(invalidImport), ontology.getUnloadableImportIRIs());
     }
 
     private File setupOntologyMocks(Model model) throws Exception{

@@ -12,12 +12,12 @@ package com.mobi.dataset.rest;
  * it under the terms of the GNU Affero General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * #L%
@@ -57,11 +57,12 @@ import com.mobi.rest.security.annotations.ActionId;
 import com.mobi.rest.security.annotations.AttributeValue;
 import com.mobi.rest.security.annotations.ResourceId;
 import com.mobi.rest.security.annotations.ValueType;
-import com.mobi.rest.util.ErrorUtils;
-import com.mobi.rest.util.FileUpload;
 import com.mobi.rest.util.LinksUtils;
+import com.mobi.rest.util.MobiNotFoundException;
 import com.mobi.rest.util.RestUtils;
 import com.mobi.rest.util.jaxb.Links;
+import com.mobi.rest.util.swagger.ErrorObjectSchema;
+import com.mobi.rest.util.swagger.JsonLdObject;
 import com.mobi.security.policy.api.ontologies.policy.Delete;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -71,12 +72,16 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.ModelFactory;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.DynamicModelFactory;
 import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.RDFParseException;
@@ -85,7 +90,7 @@ import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.jaxrs.whiteboard.propertytypes.JaxrsResource;
 
-import java.io.InputStream;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -114,9 +119,13 @@ import javax.ws.rs.core.UriInfo;
 @JaxrsResource
 @Path("/datasets")
 public class DatasetRest {
+
     private final ValueFactory vf = new ValidatingValueFactory();
     private final ModelFactory mf = new DynamicModelFactory();
+
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final String TAG_NAME = "Dataset";
+    private static final String TAG_DESC = "Operations for managing DatasetRecords and their associated RDF data";
 
     @Reference
     protected DatasetManager manager;
@@ -146,35 +155,60 @@ public class DatasetRest {
      * Retrieves all the DatasetRecords in the local Catalog in a JSON array. Can optionally be paged if passed a
      * limit and offset. Can optionally be sorted by property value if passed a sort IRI.
      *
-     * @param uriInfo URI information of the request to be used in creating links to other pages of DatasetRecords
-     * @param offset Offset for a page of DatasetRecords
-     * @param limit Number of DatasetRecords to return in one page
-     * @param sort IRI of the property to sort by
-     * @param asc Whether the list should be sorted ascending or descending. Default is ascending
+     * @param uriInfo    URI information of the request to be used in creating links to other pages of DatasetRecords
+     * @param offset     Offset for a page of DatasetRecords
+     * @param limit      Number of DatasetRecords to return in one page
+     * @param sort       IRI of the property to sort by
+     * @param asc        Whether the list should be sorted ascending or descending. Default is ascending
      * @param searchText Optional search text for the query
      * @return Response with a JSON array of DatasetRecords
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "datasets",
-            summary = "Retrieves all DatasetRecords in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Response with a JSON array of DatasetRecords"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves all DatasetRecords")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON-LD array of DatasetRecords",
+                    content = @Content(
+                            array = @ArraySchema(
+                                    schema = @Schema(
+                                            implementation = JsonLdObject.class,
+                                            description = "A list of DatasetRecord JSON-LD objects")
+                            )
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid pagination parameters or sort IRI",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to view DatasetRecords",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving DatasetRecords",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getDatasetRecords(
-            @Context HttpServletRequest servletRequest,
-            @Context UriInfo uriInfo,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context UriInfo uriInfo,
             @Parameter(description = "Offset for a page of DatasetRecords", required = true)
             @QueryParam("offset") int offset,
             @Parameter(description = "Number of DatasetRecords to return in one page", required = true)
             @QueryParam("limit") int limit,
-            @Parameter(description = "IRI of the property to sort by", required = true)
+            @Parameter(description = "IRI of the property to sort by")
             @QueryParam("sort") String sort,
             @Parameter(description = "Whether or not the list should be sorted ascending or descending")
             @DefaultValue("true") @QueryParam("ascending") boolean asc,
@@ -214,9 +248,9 @@ public class DatasetRest {
             }
             return response.build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (MobiException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 
@@ -225,35 +259,64 @@ public class DatasetRest {
      * IRI in the repository with the passed id.
      *
      * @param servletRequest The HttpServletRequest
-     * @param title The required title for the new DatasetRecord
-     * @param repositoryId The required id of a repository in Mobi
-     * @param datasetIRI The optional IRI for the new Dataset
-     * @param description The optional description for the new DatasetRecord
-     * @param markdown The optional markdown abstract for the new DatasetRecord.
-     * @param keywords The optional list of keywords strings for the new DatasetRecord
-     * @param ontologies The optional list of OntologyRecord IRI strings for the new DatasetRecord
+     * @param title          The required title for the new DatasetRecord
+     * @param repositoryId   The required id of a repository in Mobi
+     * @param datasetIRI     The optional IRI for the new Dataset
+     * @param description    The optional description for the new DatasetRecord
+     * @param markdown       The optional markdown abstract for the new DatasetRecord.
+     * @param keywords       The optional list of keywords strings for the new DatasetRecord
+     * @param ontologies     The optional list of OntologyRecord IRI strings for the new DatasetRecord
      * @return A Response with the IRI string of the created DatasetRecord
      */
     @POST
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     @Produces(MediaType.TEXT_PLAIN)
     @RolesAllowed("user")
-    @Operation(
-            tags = "datasets",
-            summary = "Creates a new DatasetRecord in the local Catalog and Dataset in the specified repository",
-            responses = {
-                    @ApiResponse(responseCode = "201",
-                            description = "Response with the IRI string of the created DatasetRecord",
-                            content = @Content(schema = @Schema(type = "string"))),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
-    @ActionAttributes(@AttributeValue(id = com.mobi.ontologies.rdfs.Resource.type_IRI, value = DatasetRecord.TYPE))
+    @Operation(summary = "Creates a new DatasetRecord with a Dataset in the specified repository")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "The IRI string of the created DatasetRecord",
+                    content = @Content(schema = @Schema(type = "string"))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Missing or invalid title, repository ID, or ontology IRI",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to create DatasetRecord",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while creating the DatasetRecord",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
+    @ActionAttributes(@AttributeValue(id = RDF.NAMESPACE + "type", value = DatasetRecord.TYPE))
     @ResourceId("http://mobi.com/catalog-local")
     public Response createDatasetRecord(
-            @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
             @Parameter(schema = @Schema(type = "string",
                     description = "Required title for the new DatasetRecord", required = true))
             @FormParam("title") String title,
@@ -279,10 +342,10 @@ public class DatasetRest {
                             "Optional list of OntologyRecord IRI strings for the new DatasetRecord"),
                     schema = @Schema(implementation = String.class, description = "OntologyRecord IRI")))
             @FormParam("ontologies") List<String> ontologies) {
-        checkStringParam(title, "Title is required");
-        checkStringParam(repositoryId, "Repository id is required");
-        User user = getActiveUser(servletRequest, engineManager);
         try (RepositoryConnection conn = configProvider.getRepository().getConnection()) {
+            checkStringParam(title, "Title is required");
+            checkStringParam(repositoryId, "Repository id is required");
+            User user = getActiveUser(servletRequest, engineManager);
             RecordOperationConfig config = new OperationConfig();
             config.set(RecordCreateSettings.CATALOG_ID, configProvider.getLocalCatalogIRI().stringValue());
             config.set(RecordCreateSettings.RECORD_TITLE, title);
@@ -302,9 +365,9 @@ public class DatasetRest {
             DatasetRecord record = recordManager.createRecord(user, config, DatasetRecord.class, conn);
             return Response.status(201).entity(record.getResource().stringValue()).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (IllegalStateException | MobiException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 
@@ -315,37 +378,61 @@ public class DatasetRest {
      * @return A Response indicating the success of the request
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Produces(MediaType.APPLICATION_JSON)
     @Path("{datasetRecordId}")
     @RolesAllowed("user")
-    @Operation(
-            tags = "datasets",
-            summary = "Gets a specific DatasetRecord from the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Success",
-                            content = @Content(schema = @Schema(type = "object"))),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves the DatasetRecord specified by the provided ID")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "JSON-LD array with the contents of the DatasetRecord's named graph",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "The provided DatasetRecord's ID is not a valid IRI",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to view this DatasetRecord",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "DatasetRecord with the provided ID does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving the DatasetRecord",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "datasetRecordId")
     public Response getDatasetRecord(
-            @Parameter(description = "IRI of a DatasetRecord", required = true)
+            @Parameter(description = "IRI of a DatasetRecord", required = true,
+                    schema = @Schema(type = "string", format = "uri",
+                            example = "http://mobi.com/dataset/2d4a4592-0b54-4057-a65f-f649261cd302"))
             @PathParam("datasetRecordId") String datasetRecordId) {
-        Resource recordIRI = vf.createIRI(datasetRecordId);
         try {
+            Resource recordIRI = vf.createIRI(datasetRecordId);
             DatasetRecord datasetRecord = manager.getDatasetRecord(recordIRI).orElseThrow(() ->
-                    ErrorUtils.sendError("DatasetRecord " + datasetRecordId + " could not be found",
-                            Response.Status.NOT_FOUND));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(
+                            "DatasetRecord " + datasetRecordId + " could not be found")));
             Model copy = mf.createEmptyModel();
             datasetRecord.getModel().forEach(st -> copy.add(st.getSubject(), st.getPredicate(), st.getObject()));
             return Response.ok(modelToJsonld(copy)).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (IllegalStateException | MobiException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 
@@ -353,46 +440,76 @@ public class DatasetRest {
      * Deletes a specific DatasetRecord and its Dataset from the local Catalog. By default only removes named graphs
      * that aren't used by another Dataset, but can be forced to delete them.
      *
-     * @param servletRequest The HttpServletRequest
+     * @param servletRequest  The HttpServletRequest
      * @param datasetRecordId The IRI of a DatasetRecord
-     * @param force Whether the delete should be forced
+     * @param force           Whether the delete should be forced
      * @return A Response indicating the success of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{datasetRecordId}")
     @RolesAllowed("user")
-    @Operation(
-            tags = "datasets",
-            summary = "Deletes a specific DatasetRecord in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Success"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Deletes a specific DatasetRecord and its associated data")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "DatasetRecord successfully deleted",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "The provided DatasetRecord's ID is not a valid IRI",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to delete this DatasetRecord",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while deleting the DatasetRecord",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(value = Delete.TYPE)
     @ResourceId(type = ValueType.PATH, value = "datasetRecordId")
     public Response deleteDatasetRecord(
-            @Context HttpServletRequest servletRequest,
-            @Parameter(schema = @Schema(description = "DatasetRecord IRI", required = true,
-                    ref = "#/components/schemas/IRI"))
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
+            @Parameter(description = "DatasetRecord IRI",
+                    schema = @Schema(type = "string", format = "uri",
+                            example = "http://mobi.com/dataset/2d4a4592-0b54-4057-a65f-f649261cd302"))
             @PathParam("datasetRecordId") String datasetRecordId,
             @Parameter(description = "Whether or not the delete should be forced")
             @DefaultValue("false") @QueryParam("force") boolean force) {
-        Resource recordIRI = vf.createIRI(datasetRecordId);
-        User activeUser = getActiveUser(servletRequest, engineManager);
         try {
-            DatasetRecord record = (force
-                    ? manager.deleteDataset(recordIRI, activeUser)
-                    : manager.safeDeleteDataset(recordIRI, activeUser));
-
+            User activeUser = getActiveUser(servletRequest, engineManager);
+            Resource recordIRI = vf.createIRI(datasetRecordId);
+            if (force) {
+                manager.deleteDataset(recordIRI, activeUser);
+            } else {
+                manager.safeDeleteDataset(recordIRI, activeUser);
+            }
+            return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (Exception ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
-        return Response.ok().build();
     }
 
     /**
@@ -400,98 +517,163 @@ public class DatasetRest {
      * graphs that aren't used by another Dataset, but can be forced to delete them.
      *
      * @param datasetRecordId The IRI of a DatasetRecord
-     * @param force Whether or not the clear should be forced
+     * @param force           Whether or not the clear should be forced
      * @return Response indicating the success of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{datasetRecordId}/data")
     @RolesAllowed("user")
-    @Operation(
-            tags = "datasets",
-            summary = "Clears the data within a specific DatasetRecord in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Success"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Clears the data within a specific DatasetRecord")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "DatasetRecord data successfully cleared",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "The provided DatasetRecord's ID is not a valid IRI",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to clear data from this DatasetRecord",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while clearing the DatasetRecord data",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(value = Modify.TYPE)
     @ResourceId(type = ValueType.PATH, value = "datasetRecordId")
     public Response clearDatasetRecord(
-            @Parameter(description = "IRI of a DatasetRecord", required = true)
+            @Parameter(description = "IRI of a DatasetRecord", required = true,
+                    schema = @Schema(type = "string", format = "uri",
+                            example = "http://mobi.com/dataset/2d4a4592-0b54-4057-a65f-f649261cd302"))
             @PathParam("datasetRecordId") String datasetRecordId,
             @Parameter(description = "Whether or not the clear should be forced")
             @DefaultValue("false") @QueryParam("force") boolean force) {
-        Resource recordIRI = vf.createIRI(datasetRecordId);
         try {
+            Resource recordIRI = vf.createIRI(datasetRecordId);
             if (force) {
                 manager.clearDataset(recordIRI);
             } else {
                 manager.safeClearDataset(recordIRI);
             }
+            return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (Exception ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
-        return Response.ok().build();
     }
 
     /**
      * Uploads all RDF data in the provided file into the Dataset of a specific DatasetRecord.
      *
-     * @param servletRequest The HttpServletRequest
+     * @param servletRequest  The HttpServletRequest
      * @param datasetRecordId The IRI of a DatasetRecord
      * @return A Response indicating the success of the request
      */
     @POST
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{datasetRecordId}/data")
     @RolesAllowed("user")
     @Operation(
-            tags = "datasets",
-            summary = "Uploads the data within an RDF file to a specific DatasetRecord in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Success"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR")
-            },
+            summary = "Uploads RDF data to a specific DatasetRecord",
             requestBody = @RequestBody(
-                    content = {
-                            @Content(mediaType = MediaType.MULTIPART_FORM_DATA,
-                                    schema = @Schema(implementation = DatasetFileUpload.class)
-                            )
-                    }
+                    content = @Content(
+                            mediaType = MediaType.MULTIPART_FORM_DATA,
+                            schema = @Schema(implementation = DatasetFileUpload.class)
+                    )
             )
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "RDF data successfully uploaded to DatasetRecord",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid RDF file format, missing file, or RDF parse error",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to upload data to this DatasetRecord",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while importing RDF data into the DatasetRecord",
+                    content = @Content(
+                        mediaType = MediaType.APPLICATION_JSON,
+                        schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(value = Modify.TYPE)
     @ResourceId(type = ValueType.PATH, value = "datasetRecordId")
-    public Response uploadData(@Context HttpServletRequest servletRequest,
-                               @Parameter(description = "IRI of a DatasetRecord", required = true)
+    public Response uploadData(
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
+                               @Parameter(description = "IRI of a DatasetRecord", required = true,
+                                       schema = @Schema(type = "string", format = "uri",
+                                               example = "http://mobi.com/dataset/2d4a4592-0b54-4057-a65f-f649261cd302"))
                                @PathParam("datasetRecordId") String datasetRecordId) {
-        Map<String, Object> formData = RestUtils.getFormData(servletRequest, new HashMap<>());
-        FileUpload file = (FileUpload) formData.getOrDefault("file", new FileUpload());
-        InputStream inputStream = file.getStream();
-        String filename = file.getFilename();
-
-        if (inputStream == null) {
-            throw ErrorUtils.sendError("Must provide a file", Response.Status.BAD_REQUEST);
-        }
-        RDFFormat format = Rio.getParserFormatForFileName(filename).orElseThrow(() ->
-                ErrorUtils.sendError("File is not in a valid RDF format", Response.Status.BAD_REQUEST));
-
-        ImportServiceConfig.Builder builder = new ImportServiceConfig.Builder()
-                .dataset(vf.createIRI(datasetRecordId))
-                .format(format)
-                .logOutput(true);
+        // Stream directly from the HTTP multipart input to the RDF parser to avoid
+        // buffering the entire file in memory/disk via ResettableInputStream.
         try {
-            importService.importInputStream(builder.build(), inputStream, true);
+            final IRI datasetRecordIri = vf.createIRI(datasetRecordId);
+            Map<String, Object> formData = RestUtils.getFormData(servletRequest, new HashMap<>(), (stream, item) -> {
+                String filename = item.getName();
+                RDFFormat format = Rio.getParserFormatForFileName(filename).orElseThrow(() ->
+                        new IllegalArgumentException("File is not in a valid RDF format"));
+                ImportServiceConfig config = new ImportServiceConfig.Builder()
+                        .dataset(datasetRecordIri)
+                        .format(format)
+                        .logOutput(true)
+                        .build();
+                try {
+                    importService.importInputStream(config, stream, true);
+                } catch (IOException e) {
+                    throw new MobiException("Error importing dataset data", e);
+                }
+                return filename;
+            });
+            if (formData.isEmpty()) {
+                throw new IllegalArgumentException("Must provide a file");
+            }
             return Response.ok().build();
-        } catch (IllegalArgumentException | RDFParseException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+        } catch (IllegalArgumentException | RDFParseException | MobiException ex) {
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (Exception ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 

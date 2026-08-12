@@ -12,12 +12,12 @@ package com.mobi.rest.util;
  * it under the terms of the GNU Affero General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * #L%
@@ -40,6 +40,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.mobi.exception.MobiException;
 import com.mobi.catalog.api.CommitManager;
 import com.mobi.catalog.api.CompiledResourceManager;
 import com.mobi.catalog.api.ontologies.mcat.InProgressCommit;
@@ -66,6 +67,7 @@ import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.rio.RDFFormat;
+import org.eclipse.rdf4j.rio.Rio;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -75,6 +77,7 @@ import org.mockito.MockitoAnnotations;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.StringReader;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
@@ -160,7 +163,7 @@ public class RestUtilsTest {
         expectedRdfxml = IOUtils.toString(Objects.requireNonNull(getClass().getResourceAsStream("/test.xml")), StandardCharsets.UTF_8);
         expectedGroupedRdfxml = IOUtils.toString(Objects.requireNonNull(getClass().getResourceAsStream("/grouped-test.xml")),
                 StandardCharsets.UTF_8);
-        expectedTrig= IOUtils.toString(Objects.requireNonNull(getClass().getResourceAsStream("/test.trig")), StandardCharsets.UTF_8);
+        expectedTrig = IOUtils.toString(Objects.requireNonNull(getClass().getResourceAsStream("/test.trig")), StandardCharsets.UTF_8);
 
         closeable = MockitoAnnotations.openMocks(this);
         when(context.getProperty(AuthenticationProps.USERNAME)).thenReturn("tester");
@@ -234,14 +237,16 @@ public class RestUtilsTest {
     public void modelToStringWithRDFFormatTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.modelToString(model, RDFFormat.JSONLD)));
         assertEquals(expectedTurtle, RestUtils.modelToString(model, RDFFormat.TURTLE));
-        assertTrue(equalsIgnoreNewline(expectedRdfxml, RestUtils.modelToString(model, RDFFormat.RDFXML)));
+        assertEquals(stringToModel(expectedRdfxml, RDFFormat.RDFXML),
+                     stringToModel(RestUtils.modelToString(model, RDFFormat.RDFXML), RDFFormat.RDFXML));
     }
 
     @Test
     public void modelToStringTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.modelToString(model, "jsonld")));
         assertEquals(expectedTurtle, RestUtils.modelToString(model, "turtle"));
-        assertTrue(equalsIgnoreNewline(expectedRdfxml, RestUtils.modelToString(model, "rdf/xml")));
+        assertEquals(stringToModel(expectedRdfxml, RDFFormat.RDFXML),
+                     stringToModel(RestUtils.modelToString(model, "rdf/xml"), RDFFormat.RDFXML));
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.modelToString(model, "something")));
     }
 
@@ -249,20 +254,23 @@ public class RestUtilsTest {
     public void modelToSkolemizedStringWithRDFFormatTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.modelToSkolemizedString(model, RDFFormat.JSONLD, service)));
         assertEquals(expectedTurtle, RestUtils.modelToSkolemizedString(model, RDFFormat.TURTLE, service));
-        assertTrue(equalsIgnoreNewline(expectedRdfxml, RestUtils.modelToSkolemizedString(model, RDFFormat.RDFXML, service)));
+        assertEquals(stringToModel(expectedRdfxml, RDFFormat.RDFXML),
+                     stringToModel(RestUtils.modelToSkolemizedString(model, RDFFormat.RDFXML, service), RDFFormat.RDFXML));
+
     }
 
     @Test
     public void modelToSkolemizedStringTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.modelToSkolemizedString(model, "jsonld", service)));
         assertEquals(expectedTurtle, RestUtils.modelToSkolemizedString(model, "turtle", service));
-        assertTrue(equalsIgnoreNewline(expectedRdfxml, RestUtils.modelToSkolemizedString(model, "rdf/xml", service)));
+        assertEquals(stringToModel(expectedRdfxml, RDFFormat.RDFXML),
+                     stringToModel(RestUtils.modelToSkolemizedString(model, "rdf/xml", service), RDFFormat.RDFXML));
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.modelToSkolemizedString(model, "something", service)));
     }
 
     @Test
     public void groupedModelToOutputStreamTest() throws IOException {
-        RDFFormat[] formatArray = new RDFFormat[] {RDFFormat.RDFXML, RDFFormat.JSONLD, RDFFormat.TURTLE};
+        RDFFormat[] formatArray = new RDFFormat[]{RDFFormat.RDFXML, RDFFormat.JSONLD, RDFFormat.TURTLE};
         for (RDFFormat format : formatArray) {
             Path file = Files.createTempFile("test", format.getDefaultFileExtension());
             OutputStream os = new ByteArrayOutputStream();
@@ -273,8 +281,7 @@ public class RestUtilsTest {
             switch (format.getName()) {
                 case "JSON-LD" -> assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(result));
                 case "Turtle" -> assertEquals(expectedGroupedTurtle, result);
-                case "RDF/XML" -> assertEquals(expectedGroupedRdfxml, result);
-            }
+                case "RDF/XML" -> assertEquals(stringToModel(expectedGroupedRdfxml, RDFFormat.RDFXML), stringToModel(result, RDFFormat.RDFXML));            }
             Files.deleteIfExists(file);
         }
     }
@@ -283,14 +290,16 @@ public class RestUtilsTest {
     public void groupedModelToStringWithRDFFormatTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.groupedModelToString(model, RDFFormat.JSONLD)));
         assertEquals(expectedGroupedTurtle, RestUtils.groupedModelToString(model, RDFFormat.TURTLE));
-        assertTrue(equalsIgnoreNewline(expectedGroupedRdfxml, RestUtils.groupedModelToString(model, RDFFormat.RDFXML)));
+        assertEquals(stringToModel(expectedGroupedRdfxml, RDFFormat.RDFXML),
+                stringToModel(RestUtils.groupedModelToString(model, RDFFormat.RDFXML), RDFFormat.RDFXML));
     }
 
     @Test
     public void groupedModelToStringTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.groupedModelToString(model, "jsonld")));
         assertEquals(expectedGroupedTurtle, RestUtils.groupedModelToString(model, "turtle"));
-        assertTrue(equalsIgnoreNewline(expectedGroupedRdfxml, RestUtils.groupedModelToString(model, "rdf/xml")));
+        assertEquals(stringToModel(expectedGroupedRdfxml, RDFFormat.RDFXML),
+                stringToModel(RestUtils.groupedModelToString(model, "rdf/xml"), RDFFormat.RDFXML));
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.groupedModelToString(model, "something")));
     }
 
@@ -298,14 +307,16 @@ public class RestUtilsTest {
     public void groupedModelToSkolemizedStringWithRDFFormatTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.groupedModelToSkolemizedString(model, RDFFormat.JSONLD, service)));
         assertEquals(expectedGroupedTurtle, RestUtils.groupedModelToSkolemizedString(model, RDFFormat.TURTLE, service));
-        assertTrue(equalsIgnoreNewline(expectedGroupedRdfxml, RestUtils.groupedModelToSkolemizedString(model, RDFFormat.RDFXML, service)));
+        assertEquals(stringToModel(expectedGroupedRdfxml, RDFFormat.RDFXML),
+                stringToModel(RestUtils.groupedModelToSkolemizedString(model, RDFFormat.RDFXML, service), RDFFormat.RDFXML));
     }
 
     @Test
     public void groupedModelToSkolemizedStringTest() {
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.groupedModelToSkolemizedString(model, "jsonld", service)));
         assertEquals(expectedGroupedTurtle, RestUtils.groupedModelToSkolemizedString(model, "turtle", service));
-        assertTrue(equalsIgnoreNewline(expectedGroupedRdfxml, RestUtils.groupedModelToSkolemizedString(model, "rdf/xml", service)));
+        assertEquals(stringToModel(expectedGroupedRdfxml, RDFFormat.RDFXML),
+                stringToModel(RestUtils.groupedModelToSkolemizedString(model, "rdf/xml", service), RDFFormat.RDFXML));
         assertEquals(removeWhitespace(expectedJsonld), removeWhitespace(RestUtils.groupedModelToSkolemizedString(model, "something", service)));
     }
 
@@ -364,14 +375,16 @@ public class RestUtilsTest {
     }
 
     @Test
-    public void getActiveUsernameThatDoesNotExistTest() {
+    public void getActiveUsernameThatDoesNotExistTest() throws Exception {
         // Setup:
         when(context.getProperty(AuthenticationProps.USERNAME)).thenReturn(null);
         try {
             RestUtils.getActiveUsername(context);
             fail("Expected MobiWebException to have been thrown");
         } catch (MobiWebException e) {
-            assertEquals(401, e.getResponse().getStatus());
+            assertEquals(500, e.getResponse().getStatus());
+            ObjectNode body = mapper.readValue(e.getResponse().getEntity().toString(), ObjectNode.class);
+            assertEquals("Missing username", body.get("errorMessage").asText());
         }
     }
 
@@ -382,13 +395,16 @@ public class RestUtilsTest {
     }
 
     @Test
-    public void getActiveUserThatDoesNotExistTest() {
+    public void getActiveUserThatDoesNotExistTest() throws Exception {
         // Setup:
         when(engineManager.retrieveUser(anyString())).thenReturn(Optional.empty());
         try {
             RestUtils.getActiveUser(context, engineManager);
+            fail("Expected MobiWebException to have been thrown");
         } catch (MobiWebException e) {
-            assertEquals(401, e.getResponse().getStatus());
+            assertEquals(500, e.getResponse().getStatus());
+            ObjectNode body = mapper.readValue(e.getResponse().getEntity().toString(), ObjectNode.class);
+            assertEquals("User not found", body.get("errorMessage").asText());
         }
     }
 
@@ -446,11 +462,15 @@ public class RestUtilsTest {
     }
 
     @Test
-    public void createIRIInvalidInputTest() {
+    public void createIRIInvalidInputTest() throws Exception {
         try {
             RestUtils.createIRI("invalidIRI", vf);
+            fail("Expected MobiWebException to have been thrown");
         } catch (MobiWebException ex) {
             assertEquals(400, ex.getResponse().getStatus());
+            ObjectNode body = mapper.readValue(ex.getResponse().getEntity().toString(), ObjectNode.class);
+            assertEquals("IllegalArgumentException", body.get("error").asText());
+            assertNotNull(body.get("errorMessage").asText());
         }
     }
 
@@ -462,7 +482,7 @@ public class RestUtilsTest {
         // TEST ASC
         Response response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 0, 1,
                 true, null, "http://example.com/test#TestThing", service);
-        ArrayNode array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        ArrayNode array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         ObjectNode jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 1", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -473,7 +493,7 @@ public class RestUtilsTest {
 
         response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 1, 1, true,
                 null, "http://example.com/test#TestThing", service);
-        array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 2", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -484,7 +504,7 @@ public class RestUtilsTest {
 
         response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 2, 1, true,
                 null, "http://example.com/test#TestThing", service);
-        array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 3", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -496,7 +516,7 @@ public class RestUtilsTest {
         // TEST DESC
         response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 0, 1, false,
                 null, "http://example.com/test#TestThing", service);
-        array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 3", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -507,7 +527,7 @@ public class RestUtilsTest {
 
         response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 1, 1, false,
                 null, "http://example.com/test#TestThing", service);
-        array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 2", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -518,7 +538,7 @@ public class RestUtilsTest {
 
         response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 2, 1, false,
                 null, "http://example.com/test#TestThing", service);
-        array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 1", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -542,7 +562,7 @@ public class RestUtilsTest {
 
         Response response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 0, 1, true,
                 f, "http://example.com/test#TestThing", service);
-        ArrayNode array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        ArrayNode array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         ObjectNode jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 1", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -553,7 +573,7 @@ public class RestUtilsTest {
 
         response = RestUtils.createPaginatedThingResponse(uriInfo, set, testPropIRI, 1, 1, true,
                 f, "http://example.com/test#TestThing", service);
-        array = mapper.readValue(response.readEntity(String.class), ArrayNode.class);
+        array = mapper.readValue(response.getEntity().toString(), ArrayNode.class);
         assertTrue(array.get(0).isObject());
         jsonObject = (ObjectNode) array.get(0);
         assertEquals("VALUE 3", jsonObject.get(testPropIRI.stringValue()).get(0).get("@value").asText());
@@ -605,13 +625,15 @@ public class RestUtilsTest {
     }
 
     @Test
-    public void validatePaginationParamsInvalidSortResourceTest() {
+    public void validatePaginationParamsInvalidSortResourceTest() throws Exception {
         try {
             RestUtils.validatePaginationParams("urn:error", Collections.singleton("urn:no-error"), 10, 0);
+            fail("Expected MobiWebException to have been thrown");
         } catch (MobiWebException ex) {
             assertEquals(400, ex.getResponse().getStatus());
+            ObjectNode body = mapper.readValue(ex.getResponse().getEntity().toString(), ObjectNode.class);
+            assertEquals("Invalid sort property IRI", body.get("errorMessage").asText());
         }
-
     }
 
     @Test
@@ -643,10 +665,74 @@ public class RestUtilsTest {
     }
 
     @Test
+    public void getErrorObjBadRequestJsonBodyTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Bad input"));
+        Response response = exception.getResponse();
+        assertEquals(400, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("IllegalArgumentException", body.get("error").asText());
+        assertEquals("Bad input", body.get("errorMessage").asText());
+        assertNotNull(body.get("errorDetails"));
+        assertTrue(body.get("errorDetails").isArray());
+    }
+
+    @Test
+    public void getErrorObjNotFoundJsonBodyTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjNotFound(new MobiNotFoundException("Resource missing"));
+        Response response = exception.getResponse();
+        assertEquals(404, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("MobiNotFoundException", body.get("error").asText());
+        assertEquals("Resource missing", body.get("errorMessage").asText());
+        assertNotNull(body.get("errorDetails"));
+        assertTrue(body.get("errorDetails").isArray());
+    }
+
+    @Test
+    public void getErrorObjForbiddenJsonBodyTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjForbidden(new IllegalAccessException("Access denied"));
+        Response response = exception.getResponse();
+        assertEquals(403, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("IllegalAccessException", body.get("error").asText());
+        assertEquals("Access denied", body.get("errorMessage").asText());
+        assertNotNull(body.get("errorDetails"));
+        assertTrue(body.get("errorDetails").isArray());
+    }
+
+    @Test
+    public void getErrorObjUnauthorizedJsonBodyTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjUnauthorized(new IllegalAccessException("Forbidden"));
+        Response response = exception.getResponse();
+        assertEquals(401, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("IllegalAccessException", body.get("error").asText());
+        assertEquals("Forbidden", body.get("errorMessage").asText());
+        assertNotNull(body.get("errorDetails"));
+    }
+
+    @Test
     public void getErrorObjInternalServerErrorTest() {
         MobiWebException exception = RestUtils.getErrorObjInternalServerError(new IllegalStateException("Exception"));
         assertEquals("Exception", exception.getMessage());
         assertEquals(500, exception.getResponse().getStatus());
+    }
+
+    @Test
+    public void getErrorObjInternalServerErrorJsonBodyTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjInternalServerError(new MobiException("Server broke"));
+        Response response = exception.getResponse();
+        assertEquals(500, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("MobiException", body.get("error").asText());
+        assertEquals("Server broke", body.get("errorMessage").asText());
+        assertNotNull(body.get("errorDetails"));
+        assertTrue(body.get("errorDetails").isArray());
     }
 
     @Test
@@ -663,6 +749,49 @@ public class RestUtilsTest {
     }
 
     @Test
+    public void getErrorObjMethodNotAllowedTest() {
+        MobiWebException exception = RestUtils.getErrorObjMethodNotAllowed(new UnsupportedOperationException("Exception"));
+        assertEquals("Exception", exception.getMessage());
+        assertEquals(405, exception.getResponse().getStatus());
+    }
+
+    @Test
+    public void getErrorObjMethodNotAllowedJsonBodyTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjMethodNotAllowed(new UnsupportedOperationException("Not allowed"));
+        Response response = exception.getResponse();
+        assertEquals(405, response.getStatus());
+        assertEquals("application/json", response.getMediaType().toString());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("UnsupportedOperationException", body.get("error").asText());
+        assertEquals("Not allowed", body.get("errorMessage").asText());
+        assertNotNull(body.get("errorDetails"));
+    }
+
+    @Test
+    public void getErrorObjWithDelimitedMessageTest() throws Exception {
+        String delimiter = Models.ERROR_OBJECT_DELIMITER;
+        String message = "Main error" + delimiter + "Detail 1" + delimiter + "Detail 2";
+        MobiWebException exception = RestUtils.getErrorObjBadRequest(new IllegalArgumentException(message));
+        Response response = exception.getResponse();
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("IllegalArgumentException", body.get("error").asText());
+        assertEquals("Main error", body.get("errorMessage").asText());
+        assertEquals(2, body.get("errorDetails").size());
+        assertEquals("Detail 1", body.get("errorDetails").get(0).asText());
+        assertEquals("Detail 2", body.get("errorDetails").get(1).asText());
+    }
+
+    @Test
+    public void getErrorObjWithNullMessageTest() throws Exception {
+        MobiWebException exception = RestUtils.getErrorObjBadRequest(new IllegalArgumentException());
+        Response response = exception.getResponse();
+        assertEquals(400, response.getStatus());
+        ObjectNode body = mapper.readValue(response.getEntity().toString(), ObjectNode.class);
+        assertEquals("IllegalArgumentException", body.get("error").asText());
+        assertNotNull(body.get("errorDetails"));
+    }
+
+    @Test
     public void testGetCurrentModel() {
         Resource recordId = mock(Resource.class);
         Resource branchId = mock(Resource.class);
@@ -670,11 +799,11 @@ public class RestUtilsTest {
         RepositoryConnection conn = mock(RepositoryConnection.class);
         Map<BNode, IRI> bNodesMap = new HashMap<>();
         Model compiledModel = mock(Model.class);
-        
+
         when(compiledResourceManager.getCompiledResource(recordId, branchId, commitId, conn)).thenReturn(compiledModel);
-        
+
         RestUtils.getCurrentModel(recordId, branchId, commitId, bNodesMap, conn, bNodeService, compiledResourceManager);
-        
+
         // Verify that the deterministicSkolemize method of bNodeService was called with the correct arguments
         verify(bNodeService).deterministicSkolemize(eq(compiledModel), eq(bNodesMap));
     }
@@ -765,10 +894,10 @@ public class RestUtilsTest {
     @Test
     public void parseExceptionForHTML() {
         String htmlResponse = """
-                <html>
-                   <head><title>503 Service Temporarily Unavailable</title></head>
-                   <body><center><h1>503 Service Temporarily Unavailable</h1></center></body>
-               </html>""";
+                 <html>
+                    <head><title>503 Service Temporarily Unavailable</title></head>
+                    <body><center><h1>503 Service Temporarily Unavailable</h1></center></body>
+                </html>""";
 
         IllegalStateException e = new IllegalStateException(htmlResponse);
         IllegalStateException ex = RestUtils.parseExceptionForHTML(e);
@@ -778,9 +907,9 @@ public class RestUtilsTest {
     @Test
     public void parseExceptionForInvalidHTMLTest() {
         String htmlResponse = """
-                <html>
-                   <body><center><h1>invalid</h1></center></body>
-               </html>""";
+                 <html>
+                    <body><center><h1>invalid</h1></center></body>
+                </html>""";
 
         IllegalStateException e = new IllegalStateException(htmlResponse);
         IllegalStateException ex = RestUtils.parseExceptionForHTML(e);
@@ -812,11 +941,11 @@ public class RestUtilsTest {
         model.add(vf.createIRI("http://example.com/test/2"), vf.createIRI("http://example.com/prop4"), vf.createLiteral("true"));
         model.add(vf.createIRI("http://example.com/test/2"), vf.createIRI("http://example.com/prop4"), vf.createLiteral("false"));
 
-        typedModel.add(vf.createIRI("http://example.com/test/0"), vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI("urn:test"));
+        typedModel.add(vf.createIRI("http://example.com/test/0"), RDF.TYPE, vf.createIRI("urn:test"));
         typedModel.add(vf.createIRI("http://example.com/test/0"), testPropIRI, vf.createLiteral("VALUE 1"));
-        typedModel.add(vf.createIRI("http://example.com/test/1"), vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI("urn:test"));
+        typedModel.add(vf.createIRI("http://example.com/test/1"), RDF.TYPE, vf.createIRI("urn:test"));
         typedModel.add(vf.createIRI("http://example.com/test/1"), testPropIRI, vf.createLiteral("VALUE 2"));
-        typedModel.add(vf.createIRI("http://example.com/test/2"), vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI("urn:test"));
+        typedModel.add(vf.createIRI("http://example.com/test/2"), RDF.TYPE, vf.createIRI("urn:test"));
         typedModel.add(vf.createIRI("http://example.com/test/2"), testPropIRI, vf.createLiteral("VALUE 3"));
     }
 
@@ -830,6 +959,14 @@ public class RestUtilsTest {
 
     private String removeWhitespace(String s) {
         return s.replaceAll("\\s+", "");
+    }
+
+    private Model stringToModel(String rdf, RDFFormat format) {
+        try {
+            return Rio.parse(new StringReader(rdf), "", format);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private Set<Thing> getTestThings(Map<IRI, String> predicateValues) {

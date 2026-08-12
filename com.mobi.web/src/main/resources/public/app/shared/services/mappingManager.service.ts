@@ -39,7 +39,7 @@ import { ProgressSpinnerService } from '../components/progress-spinner/services/
 import { REST_PREFIX } from '../../constants';
 import { RecordConfig } from '../models/recordConfig.interface';
 import { XACMLRequest } from '../models/XACMLRequest.interface';
-import { createHttpParams, handleError } from '../utility';
+import { createHttpParams, handleErrorObject } from '../utility';
 
 /**
  * @class shared:MappingManagerService
@@ -74,7 +74,7 @@ export class MappingManagerService {
     forEach(config.keywords, keyword => fd.append('keywords', keyword));
     fd.append('jsonld', JSON.stringify(jsonld));
     return this.spinnerSvc.track(this.http.post(this.prefix, fd, { responseType: 'text' }))
-      .pipe(catchError(handleError));
+      .pipe(catchError(handleErrorObject));
   }
   /**
    * Calls the GET /mobirest/mappings/{mappingName} endpoint which returns the JSONL-LD
@@ -85,7 +85,7 @@ export class MappingManagerService {
    */
   getMapping(mappingId: string): Observable<JSONLDObject[]> {
     return this.spinnerSvc.track(this.http.get<JSONLDObject[]>(`${this.prefix}/${encodeURIComponent(mappingId)}`))
-      .pipe(catchError(handleError));
+      .pipe(catchError(handleErrorObject));
   }
   /**
    * Calls the GET /mobirest/mappings/{mappingName} endpoint using the `window.location` function
@@ -120,7 +120,7 @@ export class MappingManagerService {
    */
   deleteMapping(mappingId: string): Observable<void> {
     return this.spinnerSvc.track(this.http.delete(`${this.prefix}/${encodeURIComponent(mappingId)}`))
-      .pipe(catchError(handleError), map(() => { }));
+      .pipe(catchError(handleErrorObject), map(() => { }));
   }
 
   // Edit mapping methods
@@ -134,20 +134,21 @@ export class MappingManagerService {
     return MAPPINGS + this.camelCase.transform(mappingTitle, 'class');
   }
   /**
-   * Edits the IRI template of a class mapping specified by id in a mapping. Sets the `hasPrefix` and `localName`
-   * properties of the class mapping.
+   * Edits the IRI template of a class mapping specified by id in a mapping. Sets the `iriTemplate` property and clears
+   * the legacy `hasPrefix` and `localName` properties of the class mapping.
    *
    * @param {Mapping} mapping The mapping JSON-LD array
    * @param {string} classMappingId The id of the class mapping whose IRI template will be edited
    * @param {string} prefix The new end of the prefix
    * @param {string} localNamePattern The new local name pattern. Must be in the following format: `${index/UUID}`
    */
-  editIriTemplate(mapping: Mapping, classMappingId: string, prefix: string, localNamePattern: string): void {
+  editIriTemplate(mapping: Mapping, classMappingId: string, iriTemplate: string): void {
     // Check if class mapping exists in mapping
     const classMapping = mapping.getClassMapping(classMappingId);
     if (classMapping) {
-      classMapping[`${DELIM}hasPrefix`] = [{ '@value': prefix }];
-      classMapping[`${DELIM}localName`] = [{ '@value': localNamePattern }];
+      delete classMapping[`${DELIM}hasPrefix`];
+      delete classMapping[`${DELIM}localName`];
+      classMapping[`${DELIM}iriTemplate`] = [{ '@value': iriTemplate }];
     }
   }
 

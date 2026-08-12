@@ -23,33 +23,47 @@ package com.mobi.catalog.impl;
  * #L%
  */
 
+import com.mobi.catalog.api.CatalogTopics;
 import com.mobi.catalog.api.Catalogs;
 import com.mobi.catalog.api.RecordManager;
 import com.mobi.catalog.api.ThingManager;
 import com.mobi.catalog.api.VersionManager;
+import com.mobi.catalog.api.ontologies.mcat.Tag;
 import com.mobi.catalog.api.ontologies.mcat.Version;
 import com.mobi.catalog.api.ontologies.mcat.VersionFactory;
 import com.mobi.catalog.api.ontologies.mcat.VersionedRecord;
 import com.mobi.catalog.api.ontologies.mcat.VersionedRecordFactory;
 import com.mobi.exception.MobiException;
-import com.mobi.ontologies.dcterms._Thing;
 import com.mobi.persistence.utils.ConnectionUtils;
 import com.mobi.rdf.orm.OrmFactory;
+import com.mobi.sse.SSEUtils;
 import org.apache.commons.io.IOUtils;
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.Resource;
+import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
+import org.eclipse.rdf4j.model.vocabulary.DCTERMS;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.query.Binding;
 import org.eclipse.rdf4j.query.TupleQuery;
 import org.eclipse.rdf4j.query.TupleQueryResult;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.ServiceReference;
+import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.event.Event;
+import org.osgi.service.event.EventAdmin;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -89,6 +103,16 @@ public class SimpleVersionManager implements VersionManager {
     @Reference
     VersionFactory versionFactory;
 
+    public EventAdmin eventAdmin;
+
+    @Activate
+    void start(BundleContext context) {
+        final ServiceReference<EventAdmin> ref = context.getServiceReference(EventAdmin.class);
+        if (ref != null) {
+            this.eventAdmin = context.getService(ref);
+        }
+    }
+
     @Override
     public <T extends Version> void addVersion(Resource catalogId, Resource versionedRecordId, T version,
                                                RepositoryConnection conn) {
@@ -104,6 +128,7 @@ public class SimpleVersionManager implements VersionManager {
         record.setVersion(versions);
         thingManager.updateObject(record, conn);
         thingManager.addObject(version, conn);
+        generateVersionEvent(version, versionedRecordId);
     }
 
     @Override
@@ -111,12 +136,12 @@ public class SimpleVersionManager implements VersionManager {
         OffsetDateTime now = OffsetDateTime.now();
 
         T version = factory.createNew(vf.createIRI(Catalogs.VERSION_NAMESPACE + UUID.randomUUID()));
-        version.setProperty(vf.createLiteral(title), vf.createIRI(_Thing.title_IRI));
+        version.setProperty(vf.createLiteral(title), DCTERMS.TITLE);
         if (description != null) {
-            version.setProperty(vf.createLiteral(description), vf.createIRI(_Thing.description_IRI));
+            version.setProperty(vf.createLiteral(description), DCTERMS.DESCRIPTION);
         }
-        version.setProperty(vf.createLiteral(now), vf.createIRI(_Thing.issued_IRI));
-        version.setProperty(vf.createLiteral(now), vf.createIRI(_Thing.modified_IRI));
+        version.setProperty(vf.createLiteral(now), DCTERMS.ISSUED);
+        version.setProperty(vf.createLiteral(now), DCTERMS.MODIFIED);
 
         return version;
     }
@@ -191,5 +216,53 @@ public class SimpleVersionManager implements VersionManager {
         if (!versionIRIs.contains(versionId)) {
             throw thingManager.throwDoesNotBelong(versionId, versionFactory, recordId, versionedRecordFactory);
         }
+    }
+
+    /**
+     * Generates a version-related event, capturing details about the version and its associated record.
+     * If an event administration service is available, the method constructs and prepares an event
+     * with relevant properties extracted from the provided version and record identifier.
+     *
+     * @param <T>      The specific type of {@link Version}.
+     * @param version  The version object containing data to be included in the event.
+     * @param recordId The identifier of the record associated with the version.
+     */
+    protected <T extends Version> void generateVersionEvent(T version, Resource recordId) {
+        if (eventAdmin != null) {
+            Map<String, Object> eventProps = new HashMap<>();
+            eventProps.put(CatalogTopics.VersionTopic.PROPERTY_RECORD, recordId.stringValue());
+            eventProps.put(CatalogTopics.VersionTopic.TYPE_PROPERTY, Version.TYPE);
+            eventProps.put(CatalogTopics.VersionTopic.VERSION_PROPERTY, version.getResource().stringValue());
+            Event event = new Event(CatalogTopics.VersionTopic.TOPIC_NAME, eventProps);
+
+            Model versionModel = version.getModel();
+            Model eventModel = new LinkedHashModel();
+
+            eventModel.add(version.getResource(), vf.createIRI(VersionedRecord.TYPE), recordId);
+            eventModel.add(version.getResource(), RDF.TYPE, vf.createIRI(Version.TYPE));
+
+            setPropertyValueFromModelToModel(versionModel, eventModel, vf.createIRI(Tag.commit_IRI));
+            setPropertyValueFromModelToModel(versionModel, eventModel, DCTERMS.PUBLISHER);
+            setPropertyValueFromModelToModel(versionModel, eventModel, DCTERMS.TITLE);
+
+            eventAdmin.postEvent(event);
+            SSEUtils.postEvent(eventAdmin, CatalogTopics.VersionTopic.TOPIC_NAME, eventModel);
+        }
+    }
+
+    private void setPropertyValueFromModelToModel(Model versionModel, Model updatedModel, IRI predicate) {
+        getPropertyValueFromModel(versionModel, predicate)
+                .ifPresent(updatedModel::add); //can additionally create eventProperties
+    }
+
+    private void setPropertyValueFromModelToEventProp(Model versionModel, Map<String, Object> eventProps, IRI predicate) {
+        getPropertyValueFromModel(versionModel, predicate)
+                .ifPresent(title -> eventProps.put(CatalogTopics.VersionTopic.VERSION_TITLE_PROPERTY, title.getObject().stringValue())); //can additionally create eventProperties
+    }
+
+    private Optional<Statement> getPropertyValueFromModel(Model versionModel, IRI predicate) {
+        return versionModel.filter(null, predicate, null)
+                .stream()
+                .findFirst();
     }
 }

@@ -20,7 +20,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * #L%
  */
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -28,7 +28,7 @@ import { catchError } from 'rxjs/operators';
 import { REST_PREFIX } from '../../constants';
 import { ProgressSpinnerService } from '../components/progress-spinner/services/progressSpinner.service';
 import { Repository } from '../models/repository.interface';
-import { handleError } from '../utility';
+import { handleErrorObject } from '../utility';
 
 @Injectable()
 export class RepositoryManagerService {
@@ -41,9 +41,10 @@ export class RepositoryManagerService {
      * 
      * @returns {Observable<Repository[]>} An Observable with the REST response of an array of {@link Repository} objects
      */
-    getRepositories(): Observable<Repository[]> {
-        return this.spinnerSvc.track(this.http.get<Repository[]>(this.prefix))
-            .pipe(catchError(handleError));
+    getRepositories(includeTripleCount = true): Observable<Repository[]> {
+        const params = new HttpParams().set('includeTripleCount', includeTripleCount);
+        return this.spinnerSvc.track(this.http.get<Repository[]>(this.prefix, { params }))
+            .pipe(catchError(handleErrorObject));
     }
 
     /**
@@ -54,6 +55,6 @@ export class RepositoryManagerService {
      */
     getRepository(id: string): Observable<Repository> {
         return this.spinnerSvc.track(this.http.get<Repository>(`${this.prefix}/${encodeURIComponent(id)}`))
-            .pipe(catchError(handleError));
+            .pipe(catchError(handleErrorObject));
     }
 }

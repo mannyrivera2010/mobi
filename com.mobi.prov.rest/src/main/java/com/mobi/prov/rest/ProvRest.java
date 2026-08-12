@@ -45,18 +45,22 @@ import com.mobi.prov.api.ProvActivityAction;
 import com.mobi.prov.api.ProvenanceService;
 import com.mobi.repository.api.OsgiRepository;
 import com.mobi.repository.api.RepositoryManager;
-import com.mobi.rest.util.ErrorUtils;
 import com.mobi.rest.util.LinksUtils;
+import com.mobi.rest.util.MobiNotFoundException;
 import com.mobi.rest.util.RestUtils;
 import com.mobi.rest.util.jaxb.Links;
+import com.mobi.rest.util.swagger.ErrorObjectSchema;
 import com.mobi.security.policy.api.PDP;
 import com.mobi.security.policy.api.Request;
 import com.mobi.security.policy.api.ontologies.policy.Read;
 import com.mobi.security.policy.api.xacml.XACML;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.StopWatch;
@@ -109,7 +113,8 @@ import javax.ws.rs.core.UriInfo;
 @JaxrsResource
 @Path("/provenance-data")
 public class ProvRest {
-
+    private static final String TAG_NAME = "Provenance";
+    private static final String TAG_DESC = "Operations for retrieving provenance activity history";
     private static final Logger LOG = LoggerFactory.getLogger(ProvRest.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
@@ -164,26 +169,40 @@ public class ProvRest {
      * @return A JSON object with a key for activities and a key for entities
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "provenance-data",
-            summary = "Retrieves a JSON object with a paginated list of provenance Activities and referenced Entities",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "A JSON object with a key for activities and a key for entities"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
-    public Response getActivities(@Context HttpServletRequest servletRequest,
-            @Context UriInfo uriInfo,
+    @Operation(summary = "Retrieves a JSON object with a paginated list of provenance Activities and referenced "
+            + "Entities")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON object with a key for activities and a key for entities"
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to view provenance activities",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving provenance activities",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
+    public Response getActivities(@Parameter(hidden = true) @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context UriInfo uriInfo,
             @Parameter(description = "An entity IRI to filter the results by", required = false)
             @QueryParam("entity") String entityIri,
             @Parameter(description = "An entity IRI to filter the results by", required = false)
             @QueryParam("agent") String agentIri,
-            @Parameter(schema = @Schema(type = "integer", description = "The URI information of the request "
-                    + "to be used in creating links to other pages of Activities", required = false))
+            @Parameter(schema = @Schema(type = "integer", description = "The URI information of the request to be used "
+                    + "in creating links to other pages of Activities", required = false))
             @DefaultValue("0") @QueryParam("offset") int offset,
             @Parameter(schema = @Schema(type = "integer", description = "The offset for the page", required = false))
             @DefaultValue("50") @QueryParam("limit") int limit) {
@@ -291,7 +310,7 @@ public class ProvRest {
             List<Activity> activityList = new ArrayList<>();
             activities.stream().skip(offset).limit(limit).forEach(activityIRI -> {
                 Activity fullActivity = provService.getActivity(activityIRI).orElseThrow(() ->
-                        ErrorUtils.sendError("Activity could not be found", Response.Status.INTERNAL_SERVER_ERROR));
+                        RestUtils.getErrorObjInternalServerError(new IllegalStateException("Activity could not be found")));
                 activityList.add(fullActivity);
                 Model entityModel = mf.createEmptyModel();
                 entityModel.addAll(fullActivity.getModel());
@@ -322,8 +341,10 @@ public class ProvRest {
                 response = response.link(links.getBase() + links.getPrev(), "prev");
             }
             return response.build();
+        } catch (IllegalArgumentException ex) {
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (MobiException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 
@@ -333,32 +354,54 @@ public class ProvRest {
      * @return A JSON object that is the complete representation of the provenance Activity
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{activityId}")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "provenance-data",
-            summary = "Retrieves a JSON object representing the passed in provenance Activity",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "A JSON object representing the passed in activity"),
-                    @ApiResponse(responseCode = "404", description = "Activity Not Found"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves a JSON-LD object representing the provenance Activity specified by the provided ID")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON-LD object representing the identified Activity"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "The provided activity ID is not a valid IRI",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to view this activity",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Provenance Activity with the provided ID does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving the provenance activity",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getActivity(
             @Parameter(description = "String representing the identifier of the activity", required = true)
             @PathParam("activityId") String provenanceId) {
         try {
             Activity provActivity = provService.getActivity(vf.createIRI(provenanceId)).orElseThrow(() ->
-                    ErrorUtils.sendError("Provenance Activity not found", Response.Status.NOT_FOUND));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("Provenance Activity not found")));
             String json = groupedModelToString(provActivity.getModel(), getRDFFormat("jsonld"));
             return Response.ok(getObjectFromJsonld(json)).build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -369,29 +412,51 @@ public class ProvRest {
      * @return Returns a JSON object of the action words, predicate, and types.
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("/actions")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "provenance-data",
-            summary = "Retrieves a JSON object of the action words for activities",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "A JSON object containing the action words, predicate, and types."),
-                    @ApiResponse(responseCode = "404", description = "Activity actions not found"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves a JSON object of the action words for activities")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON object containing the action words, predicate, and types."
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid request for activity action words",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to view activity actions",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "No activity action words found",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving activity action words",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getActionWords() {
         try {
             List<ProvActivityAction> activityToAction = provService.getActionWords();
             String json = mapper.writeValueAsString(activityToAction);
             return Response.ok(json).build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException | JsonProcessingException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 

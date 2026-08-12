@@ -47,9 +47,10 @@ import com.mobi.rest.security.annotations.ActionId;
 import com.mobi.rest.security.annotations.AttributeValue;
 import com.mobi.rest.security.annotations.ResourceId;
 import com.mobi.rest.security.annotations.ValueType;
-import com.mobi.rest.util.ErrorUtils;
 import com.mobi.rest.util.FileUpload;
+import com.mobi.rest.util.MobiNotFoundException;
 import com.mobi.rest.util.RestUtils;
+import com.mobi.rest.util.swagger.ErrorObjectSchema;
 import com.mobi.security.policy.api.ontologies.policy.Delete;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -59,10 +60,13 @@ import io.swagger.v3.oas.annotations.media.Encoding;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.apache.commons.lang3.StringUtils;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.rio.Rio;
@@ -103,6 +107,9 @@ import javax.ws.rs.core.StreamingOutput;
 @Path("/mappings")
 public class MappingRest {
 
+    private static final String TAG_NAME = "Mapping";
+    private static final String TAG_DESC = "Operations for managing data mapping records";
+
     private final Logger logger = LoggerFactory.getLogger(MappingRest.class);
 
     private final ValueFactory vf = new ValidatingValueFactory();
@@ -129,29 +136,61 @@ public class MappingRest {
      * @return Response with the MappingRecord Resource ID
      */
     @POST
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Produces(MediaType.TEXT_PLAIN)
     @RolesAllowed("user")
     @Operation(
-            tags = "mappings",
-            summary = "Upload mapping sent as form data",
-            responses = {
-                    @ApiResponse(responseCode = "201", description = "Response with the MappingRecord Resource ID"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            },
+            summary = "Uploads a MappingRecord",
             requestBody = @RequestBody(
-                    content = {
-                            @Content(mediaType = MediaType.MULTIPART_FORM_DATA, encoding = {
-                                    @Encoding(name = "keywords", explode = true)
-                                }, schema = @Schema(implementation = MappingFileUpload.class)
-                            )
-                    }
+                    content = @Content(
+                            mediaType = MediaType.MULTIPART_FORM_DATA,
+                            encoding = @Encoding(name = "keywords", explode = true),
+                            schema = @Schema(implementation = MappingFileUpload.class)
+                    )
             )
     )
-    @ActionAttributes(@AttributeValue(id = com.mobi.ontologies.rdfs.Resource.type_IRI, value = MappingRecord.TYPE))
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "The IRI string of the created MappingRecord"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Mapping data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to perform this action",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while uploading the MappingRecord",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
+    @ActionAttributes(@AttributeValue(id = RDF.NAMESPACE + "type", value = MappingRecord.TYPE))
     @ResourceId("http://mobi.com/catalog-local")
-    public Response upload(@Context HttpServletRequest servletRequest) {
+    public Response upload(@Parameter(hidden = true) @Context HttpServletRequest servletRequest) {
         Map<String, List<Class<?>>> fields = new HashMap<>();
         fields.put("title", List.of(String.class));
         fields.put("description", List.of(String.class));
@@ -170,7 +209,8 @@ public class MappingRest {
         String filename = file.getFilename();
 
         if ((inputStream == null && jsonld == null) || (inputStream != null && jsonld != null)) {
-            throw ErrorUtils.sendError("Must provide either a file or a JSON-LD string", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(
+                    new IllegalArgumentException("Must provide either a file or a JSON-LD string"));
         }
         checkStringParam(title, "Title is required");
         User user = getActiveUser(servletRequest, engineManager);
@@ -203,9 +243,9 @@ public class MappingRest {
             record = recordManager.createRecord(user, config, MappingRecord.class, conn);
             return Response.status(201).entity(record.getResource().stringValue()).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -241,19 +281,42 @@ public class MappingRest {
      * @return Response with the JSON-LD from the uploaded mapping
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordId}")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "mappings",
-            summary = "Retrieve JSON-LD of an uploaded mapping",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Response with the uploaded mapping JSON-LD"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves JSON-LD of an uploaded mapping")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "The uploaded mapping JSON-LD"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Mapping data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to perform this action",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Mapping with the provided ID does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving the mapping JSON-LD",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "recordId")
     public Response getMapping(
             @Parameter(description = "ID of an uploaded mapping", required = true)
@@ -261,13 +324,13 @@ public class MappingRest {
         try {
             logger.info("Getting mapping " + recordId);
             MappingWrapper mapping = manager.retrieveMapping(vf.createIRI(recordId)).orElseThrow(() ->
-                    ErrorUtils.sendError("Mapping not found", Response.Status.NOT_FOUND));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("Mapping not found")));
             String mappingJsonld = groupedModelToString(mapping.getModel(), getRDFFormat(JSON_LD));
             return Response.ok(mappingJsonld).build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -279,19 +342,57 @@ public class MappingRest {
      * @return a response with mapping to download
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordId}")
     @Produces({MediaType.APPLICATION_OCTET_STREAM, "text/*", "application/*"})
     @RolesAllowed("user")
-    @Operation(
-            tags = "mappings",
-            summary = "Download an uploaded mapping",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Response with mapping to download"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Downloads an uploaded mapping")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "The mapping file in the requested RDF format"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Mapping data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to perform this action",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Mapping with the provided ID does not exist",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while downloading the mapping",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "recordId")
     public Response downloadMapping(
             @Parameter(description = "Id of an uploaded mapping", required = true)
@@ -301,7 +402,7 @@ public class MappingRest {
         try {
             logger.info("Downloading mapping " + recordId);
             MappingWrapper mapping = manager.retrieveMapping(vf.createIRI(recordId)).orElseThrow(() ->
-                    ErrorUtils.sendError("Mapping not found", Response.Status.NOT_FOUND));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("Mapping not found")));
             RDFFormat rdfFormat = getRDFFormat(format);
             String mappingJsonld = groupedModelToString(mapping.getModel(), rdfFormat);
             StreamingOutput stream = os -> {
@@ -316,9 +417,9 @@ public class MappingRest {
                     + rdfFormat.getDefaultFileExtension()).header("Content-Type", rdfFormat.getDefaultMIMEType())
                     .build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -330,23 +431,50 @@ public class MappingRest {
      * @return Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordId}")
     @RolesAllowed("user")
-    @Operation(
-            tags = "mappings",
-            summary = "Delete an uploaded mapping",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Response indicating the success or failure of "
-                            + "the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "403", description = "Permission Denied"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Deletes an uploaded mapping")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Mapping successfully deleted",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Mapping data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "User does not have permission to perform this action",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while deleting the mapping",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(Delete.TYPE)
     @ResourceId(type = ValueType.PATH, value = "recordId")
     public Response deleteMapping(
-            @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
             @Parameter(description = "ID of an uploaded mapping", required = true)
             @PathParam("recordId") String recordId) {
         try (RepositoryConnection conn = configProvider.getRepository().getConnection()) {
@@ -354,9 +482,9 @@ public class MappingRest {
             recordManager.removeRecord(catalogId, vf.createIRI(recordId), getActiveUser(servletRequest, engineManager),
                     MappingRecord.class, conn);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         }
         return Response.ok().build();
     }

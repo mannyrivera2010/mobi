@@ -26,6 +26,7 @@ package com.mobi.etl.service.delimited;
 import static com.google.common.base.CharMatcher.whitespace;
 import static com.mobi.etl.api.delimited.ExcelUtils.getCellText;
 
+import com.mobi.catalog.api.RecordPrefixManager;
 import com.mobi.etl.api.config.delimited.ExcelConfig;
 import com.mobi.etl.api.config.delimited.SVConfig;
 import com.mobi.etl.api.delimited.DelimitedConverter;
@@ -38,7 +39,6 @@ import com.mobi.exception.MobiException;
 import com.mobi.ontology.core.api.DataProperty;
 import com.mobi.ontology.core.api.Ontology;
 import com.mobi.ontology.core.api.OntologyManager;
-import com.mobi.vocabularies.xsd.XSD;
 import com.opencsv.CSVParser;
 import com.opencsv.CSVParserBuilder;
 import com.opencsv.CSVReader;
@@ -58,7 +58,10 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.DynamicModelFactory;
 import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
+import org.eclipse.rdf4j.model.vocabulary.XSD;
 import org.eclipse.rdf4j.rio.RDFFormat;
+import org.eclipse.rdf4j.rio.RDFWriter;
 import org.eclipse.rdf4j.rio.Rio;
 import org.eclipse.rdf4j.rio.WriterConfig;
 import org.eclipse.rdf4j.rio.helpers.TurtleWriterSettings;
@@ -90,7 +93,7 @@ import java.util.regex.Pattern;
 public class DelimitedConverterImpl implements DelimitedConverter {
     private static final Logger LOGGER = LoggerFactory.getLogger(DelimitedConverterImpl.class);
     private static final String LOCAL_NAME_PATTERN = "\\$\\{(\\d+|UUID)}";
-    private static final String DEFAULT_PREFIX = "http://mobi.com/data/";
+    private static final String DEFAULT_PREFIX = "http://mobi.solutions/data/";
 
     private final ValueFactory valueFactory = new ValidatingValueFactory();
     private final ModelFactory modelFactory = new DynamicModelFactory();
@@ -128,6 +131,15 @@ public class DelimitedConverterImpl implements DelimitedConverter {
         long offset = config.getOffset();
         boolean containsHeaders = config.getContainsHeaders();
 
+        WriterConfig writerConfig = new WriterConfig();
+        writerConfig.set(TurtleWriterSettings.ABBREVIATE_NUMBERS, false);
+        RDFWriter writer = Rio.createWriter(format, convertedOutput);
+        writer.setWriterConfig(writerConfig);
+        writer.startRDF();
+        if (!format.equals(RDFFormat.JSONLD)) {
+            RecordPrefixManager.STANDARD_PREFIXES.forEach(writer::handleNamespace);
+        }
+
         CSVParser parser = new CSVParserBuilder().withSeparator(config.getSeparator()).build();
         try (CSVReader reader = new CSVReaderBuilder(new InputStreamReader(config.getData(), config.getCharset()))
                 .withCSVParser(parser).build()) {
@@ -146,13 +158,11 @@ public class DelimitedConverterImpl implements DelimitedConverter {
             long index = config.getOffset();
             Optional<Long> limit = config.getLimit();
             while ((nextLine = reader.readNext()) != null && (limit.isEmpty() || index < limit.get() + offset)) {
-                //Exporting to CSV from Excel can cause empty rows to contain columns
-                //Therefore, we must ensure at least one cell has values before processing the row
                 boolean rowContainsValues = false;
                 for (String cell : nextLine) {
                     if (!cell.isEmpty()) {
                         rowContainsValues = true;
-                        writeClassMappingsToModel(convertedOutput, nextLine, classMappings, sourceOntologies, format);
+                        writeClassMappingsToModel(writer, nextLine, classMappings, sourceOntologies);
                         break;
                     }
                 }
@@ -165,6 +175,7 @@ public class DelimitedConverterImpl implements DelimitedConverter {
             throw new IllegalStateException("Error reading csv.", e);
         }
 
+        writer.endRDF();
         return path;
     }
 
@@ -179,14 +190,23 @@ public class DelimitedConverterImpl implements DelimitedConverter {
         OutputStream convertedRDF = Files.newOutputStream(path);
         ArrayList<ClassMapping> classMappings = parseClassMappings(config.getMapping());
 
-        convertExcel(config, convertedRDF, sourceOntologies, classMappings, format);
+        WriterConfig writerConfig = new WriterConfig();
+        writerConfig.set(TurtleWriterSettings.ABBREVIATE_NUMBERS, false);
+        RDFWriter writer = Rio.createWriter(format, convertedRDF);
+        writer.setWriterConfig(writerConfig);
+        writer.startRDF();
+        if (!format.equals(RDFFormat.JSONLD)) {
+            RecordPrefixManager.STANDARD_PREFIXES.forEach(writer::handleNamespace);
+        }
 
+        convertExcel(config, writer, sourceOntologies, classMappings);
+
+        writer.endRDF();
         return path;
     }
 
-    private void convertExcel(ExcelConfig config, OutputStream convertedRDF, Set<Ontology> sourceOntologies,
-                              ArrayList<ClassMapping> classMappings, RDFFormat format) throws IOException {
-        // Arguments will extract cell formatting and mark a cell as in error if it could not be parsed
+    private void convertExcel(ExcelConfig config, RDFWriter writer, Set<Ontology> sourceOntologies,
+                              ArrayList<ClassMapping> classMappings) throws IOException {
         ReadingOptions readingOptions = new ReadingOptions(true, true);
         try (ReadableWorkbook wb = new ReadableWorkbook(config.getData(), readingOptions)) {
             Sheet sheet = wb.getFirstSheet();
@@ -195,10 +215,8 @@ public class DelimitedConverterImpl implements DelimitedConverter {
             Optional<Long> limit = config.getLimit();
             AtomicLong lastRowNumber = new AtomicLong(-1);
 
-            //Traverse each row and convert column into RDF
             sheet.openStream().forEach(row -> {
                 int zeroBasedRowNum = row.getRowNum() - 1;
-                // If headers exist or the row is before the offset point, skip the row
                 if ((containsHeaders && zeroBasedRowNum == 0)
                         || zeroBasedRowNum - (containsHeaders ? 1 : 0) < offset
                         || (limit.isPresent() && zeroBasedRowNum >= limit.get() + offset)
@@ -206,12 +224,10 @@ public class DelimitedConverterImpl implements DelimitedConverter {
                     lastRowNumber.getAndIncrement();
                     return;
                 }
-                // Logging the automatic skip of empty rows with no formatting
                 while (row.getRowNum() > lastRowNumber.get() + 1) {
                     LOGGER.debug("Skipping empty row number: {}", lastRowNumber.get() + 1);
                     lastRowNumber.getAndIncrement();
                 }
-                // getCellCount instead of getPhysicalCellCount so that blank values don't cause cells to shift
                 String[] cells = new String[row.getCellCount()];
                 boolean rowContainsValues = false;
                 for (int i = 0; i < row.getCellCount(); i++) {
@@ -221,9 +237,8 @@ public class DelimitedConverterImpl implements DelimitedConverter {
                         rowContainsValues = true;
                     }
                 }
-                // Skipping empty rows
                 if (rowContainsValues) {
-                    writeClassMappingsToModel(convertedRDF, cells, classMappings, sourceOntologies, format);
+                    writeClassMappingsToModel(writer, cells, classMappings, sourceOntologies);
                 } else {
                     LOGGER.debug("Skipping empty row number: {}", row.getRowNum());
                 }
@@ -233,21 +248,18 @@ public class DelimitedConverterImpl implements DelimitedConverter {
     }
 
     /**
-     * Processes a row of data into RDF using class mappings and adds it to the given Model.
+     * Processes a row of data into RDF using class mappings and writes statements to the provided RDFWriter.
      *
-     * @param convertedOutput  the OutputStream to hold the converted data
+     * @param writer        the RDFWriter to write the converted data to
      * @param line          the data to convert
      * @param classMappings the classMappings to use when converting the data
      */
-    private void writeClassMappingsToModel(OutputStream convertedOutput, String[] line, List<ClassMapping> classMappings,
-                                           Set<Ontology> sourceOntologies, RDFFormat format) {
-        // Map holds ClassMappings to instance IRIs. Modified by writeClassToModel().
+    private void writeClassMappingsToModel(RDFWriter writer, String[] line, List<ClassMapping> classMappings,
+                                           Set<Ontology> sourceOntologies) {
         Map<Resource, IRI> mappedClasses = new HashMap<>();
-        WriterConfig writerConfig = new WriterConfig();
-        writerConfig.set(TurtleWriterSettings.ABBREVIATE_NUMBERS, false);
         for (ClassMapping cm : classMappings) {
-            Rio.write(writeClassToModel(cm, line, mappedClasses, sourceOntologies), convertedOutput, format,
-                    writerConfig);
+            writeClassToModel(cm, line, mappedClasses, sourceOntologies)
+                    .forEach(writer::handleStatement);
         }
     }
 
@@ -277,23 +289,28 @@ public class DelimitedConverterImpl implements DelimitedConverter {
         if (mappedClasses.containsKey(cm.getResource())) {
             classInstance = mappedClasses.get(cm.getResource());
         } else {
-            Optional<String> nameOptional = generateLocalName(cm, nextLine);
-            if (nameOptional.isEmpty()) {
-                return convertedRDF;
-            }
+            if (cm.getIriTemplate().isPresent()) {
+                Optional<String> filledTemplate = fillIriTemplate(cm, nextLine);
+                if (filledTemplate.isEmpty()) {
+                    return convertedRDF;
+                }
+                classInstance = valueFactory.createIRI(filledTemplate.get());
+            } else if (cm.getHasPrefix().isPresent() || cm.getLocalName().isPresent()) {
+                Optional<String> nameOptional = generateLocalName(cm, nextLine);
+                if (nameOptional.isEmpty()) {
+                    return convertedRDF;
+                }
 
-            Iterator<String> prefixes = cm.getHasPrefix().iterator();
-            if (prefixes.hasNext()) {
-                classInstance = valueFactory.createIRI(prefixes.next() + nameOptional.get());
+                String prefix = cm.getHasPrefix().orElse(DEFAULT_PREFIX);
+                classInstance = valueFactory.createIRI(prefix + nameOptional.get());
             } else {
-                classInstance = valueFactory.createIRI(DEFAULT_PREFIX + nameOptional.get());
+                classInstance = valueFactory.createIRI(DEFAULT_PREFIX + generateUuid());
             }
         }
 
         Set<Resource> mapsTo = cm.getMapsTo_resource();
         mapsTo.forEach(resource ->
-                        convertedRDF.add(classInstance,
-                                valueFactory.createIRI(com.mobi.ontologies.rdfs.Resource.type_IRI), resource));
+                        convertedRDF.add(classInstance, RDF.TYPE, resource));
         if (mapsTo.isEmpty()) {
             throw new MobiETLException("Invalid mapping configuration. Missing mapsTo property on "
                     + cm.getResource());
@@ -303,7 +320,7 @@ public class DelimitedConverterImpl implements DelimitedConverter {
 
         cm.getDataProperty().forEach(dataMapping -> {
             // Default datatype is xsd:string
-            final IRI[] datatype = {org.eclipse.rdf4j.model.vocabulary.XSD.STRING};
+            final IRI[] datatype = {XSD.STRING};
             Optional<Resource> datatypeOpt = dataMapping.getDatatypeSpec_resource();
             Optional<Value> languageOpt = dataMapping.getLanguageSpec();
             int columnIndex = dataMapping.getColumnIndex().iterator().next();
@@ -334,12 +351,12 @@ public class DelimitedConverterImpl implements DelimitedConverter {
                         }
                         try {
                             // Validate URIs specifically
-                            if (Objects.equals(datatype[0].stringValue(), XSD.ANYURI)) {
+                            if (Objects.equals(datatype[0], XSD.ANYURI)) {
                                 valueFactory.createIRI(nextLine[columnIndex]);
                             }
                             // Transform any potential boolean values to lowercase as ValidatingValueFactory doesn't
                             // accept uppercase TRUE and FALSE
-                            if (Objects.equals(datatype[0].stringValue(), XSD.BOOLEAN)) {
+                            if (Objects.equals(datatype[0], XSD.BOOLEAN)) {
                                 literal = valueFactory.createLiteral(nextLine[columnIndex].toLowerCase(), datatype[0]);
                             } else {
                                 literal = valueFactory.createLiteral(nextLine[columnIndex], datatype[0]);
@@ -377,13 +394,24 @@ public class DelimitedConverterImpl implements DelimitedConverter {
             if (mappedClasses.containsKey(targetClassMapping.getResource())) {
                 targetIri = mappedClasses.get(targetClassMapping.getResource());
             } else {
-                Optional<String> targetNameOptional = generateLocalName(targetClassMapping, nextLine);
-                if (targetNameOptional.isEmpty()) {
-                    return;
+                if (targetClassMapping.getIriTemplate().isPresent()) {
+                    Optional<String> filledTemplate = fillIriTemplate(targetClassMapping, nextLine);
+                    if (filledTemplate.isEmpty()) {
+                        return;
+                    }
+                    targetIri = valueFactory.createIRI(filledTemplate.get());
+                } else if (targetClassMapping.getLocalName().isPresent()
+                        || targetClassMapping.getHasPrefix().isPresent()) {
+                    Optional<String> targetNameOptional = generateLocalName(targetClassMapping, nextLine);
+                    if (targetNameOptional.isEmpty()) {
+                        return;
+                    } else {
+                        String prefix = targetClassMapping.getHasPrefix().orElse(DEFAULT_PREFIX);
+                        targetIri = valueFactory.createIRI(prefix + targetNameOptional.get());
+                        mappedClasses.put(targetClassMapping.getResource(), targetIri);
+                    }
                 } else {
-                    targetIri = valueFactory.createIRI(targetClassMapping.getHasPrefix().iterator().next()
-                            + targetNameOptional.get());
-                    mappedClasses.put(targetClassMapping.getResource(), targetIri);
+                    return;
                 }
             }
 
@@ -391,6 +419,56 @@ public class DelimitedConverterImpl implements DelimitedConverter {
         });
 
         return convertedRDF;
+    }
+
+    Optional<String> fillIriTemplate(ClassMapping cm, String[] currentLine) {
+        Optional<String> templateOptional = cm.getIriTemplate();
+        if (templateOptional.isEmpty()) {
+            return Optional.of(DEFAULT_PREFIX + generateUuid());
+        }
+
+        String template = templateOptional.get();
+        Pattern pat = Pattern.compile(LOCAL_NAME_PATTERN);
+        Matcher mat = pat.matcher(template);
+
+        // If no patterns found, return the original string
+        if (!mat.find()) {
+            return Optional.of(template);
+        }
+
+        // Reset matcher to process from the beginning
+        mat.reset();
+
+        StringBuilder result = new StringBuilder();
+        boolean hasNonEmptyReplacement = false;
+
+        while (mat.find()) {
+            String capture = mat.group(1);
+            String replacement;
+
+            if ("UUID".equals(capture)) {
+                replacement = UUID.randomUUID().toString();
+                hasNonEmptyReplacement = true;
+            } else {
+                int index = Integer.parseInt(capture);
+                if (currentLine != null && index >= 0 && index < currentLine.length) {
+                    replacement = currentLine[index];
+                    if (!replacement.isEmpty()) {
+                        hasNonEmptyReplacement = true;
+                    }
+                } else {
+                    // Out of bounds - replace with empty string
+                    replacement = "";
+                }
+            }
+
+            mat.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+
+        mat.appendTail(result);
+
+        // If all replacements were empty strings, return empty Optional
+        return hasNonEmptyReplacement ? Optional.of(result.toString()) : Optional.empty();
     }
 
     /**
@@ -446,9 +524,7 @@ public class DelimitedConverterImpl implements DelimitedConverter {
     private ArrayList<ClassMapping> parseClassMappings(Model mappingModel) {
         ArrayList<ClassMapping> classMappings = new ArrayList<>();
 
-        Model classMappingModel = mappingModel.filter(null,
-                valueFactory.createIRI(com.mobi.ontologies.rdfs.Resource.type_IRI),
-                valueFactory.createIRI(ClassMapping.TYPE));
+        Model classMappingModel = mappingModel.filter(null, RDF.TYPE, valueFactory.createIRI(ClassMapping.TYPE));
         classMappingModel.subjects().forEach(cmSubject -> {
             classMappingFactory.getExisting(cmSubject, mappingModel).ifPresent(classMappings::add);
         });

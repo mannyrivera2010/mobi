@@ -23,6 +23,9 @@ package com.mobi.dataset.rest;
  * #L%
  */
 
+import static com.mobi.rest.test.util.ErrorResponseAssert.assertErrorContains;
+import static com.mobi.rest.test.util.ErrorResponseAssert.assertErrorResponse;
+import static com.mobi.rest.test.util.ErrorResponseAssert.assertErrorType;
 import static com.mobi.persistence.utils.ResourceUtils.encode;
 import static com.mobi.rdf.orm.test.OrmEnabledTestCase.getRequiredOrmFactory;
 import static com.mobi.rdf.orm.test.OrmEnabledTestCase.getValueFactory;
@@ -182,11 +185,11 @@ public class DatasetRestTest extends MobiRestTestCXF {
         OrmFactory<Commit> commitFactory = getRequiredOrmFactory(Commit.class);
 
         record1 = datasetRecordFactory.createNew(vf.createIRI("http://example.com/record1"));
-        record1.setProperty(vf.createLiteral("A"), vf.createIRI(DCTERMS.TITLE.stringValue()));
+        record1.setProperty(vf.createLiteral("A"), DCTERMS.TITLE);
         record2 = datasetRecordFactory.createNew(vf.createIRI("http://example.com/record2"));
-        record2.setProperty(vf.createLiteral("B"), vf.createIRI(DCTERMS.TITLE.stringValue()));
+        record2.setProperty(vf.createLiteral("B"), DCTERMS.TITLE);
         record3 = datasetRecordFactory.createNew(vf.createIRI("http://example.com/record3"));
-        record3.setProperty(vf.createLiteral("C"), vf.createIRI(DCTERMS.TITLE.stringValue()));
+        record3.setProperty(vf.createLiteral("C"), DCTERMS.TITLE);
         user = userFactory.createNew(vf.createIRI("http://example.com/" + UsernameTestFilter.USERNAME));
         commit = commitFactory.createNew(commitIRI);
         branch = branchFactory.createNew(branchIRI);
@@ -292,7 +295,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
         when(recordManager.findRecord(any(Resource.class), any(PaginatedSearchParams.class), any(User.class), any(RepositoryConnection.class))).thenThrow(new MobiException());
 
         Response response = target().path("datasets").request().get();
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
     }
 
     /* POST datasets */
@@ -333,7 +336,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
         FormDataMultiPart fd = new FormDataMultiPart().field("repositoryId", "system");
 
         Response response = target().path("datasets").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Title is required");
     }
 
     @Test
@@ -342,7 +345,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
         FormDataMultiPart fd = new FormDataMultiPart().field("title", "title");
 
         Response response = target().path("datasets").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Repository id is required");
     }
 
     @Test
@@ -353,7 +356,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
         when(recordManager.createRecord(any(User.class), any(RecordOperationConfig.class), any(), any(RepositoryConnection.class))).thenThrow(new IllegalArgumentException());
 
         Response response = target().path("datasets").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -365,7 +368,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
                 .field("ontologies", errorIRI.stringValue());
 
         Response response = target().path("datasets").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -377,7 +380,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
                 .field("ontologies", errorIRI.stringValue());
 
         Response response = target().path("datasets").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -401,7 +404,7 @@ public class DatasetRestTest extends MobiRestTestCXF {
         when(recordManager.createRecord(any(User.class), any(RecordOperationConfig.class), any(), any(RepositoryConnection.class))).thenThrow(new MobiException());
 
         Response response = target().path("datasets").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
     }
 
     /* GET datasets/{datasetId} */
@@ -418,8 +421,8 @@ public class DatasetRestTest extends MobiRestTestCXF {
         when(datasetManager.getDatasetRecord(any(Resource.class))).thenReturn(Optional.empty());
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue())).request().get();
-        assertEquals(404, response.getStatus());
         verify(datasetManager).getDatasetRecord(record1.getResource());
+        assertErrorContains(response, 404, "MobiNotFoundException", "could not be found");
     }
 
     @Test
@@ -427,8 +430,8 @@ public class DatasetRestTest extends MobiRestTestCXF {
         doThrow(new IllegalArgumentException()).when(datasetManager).getDatasetRecord(any(Resource.class));
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue())).request().get();
-        assertEquals(400, response.getStatus());
         verify(datasetManager).getDatasetRecord(record1.getResource());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -436,8 +439,8 @@ public class DatasetRestTest extends MobiRestTestCXF {
         doThrow(new IllegalStateException()).when(datasetManager).getDatasetRecord(any(Resource.class));
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue())).request().get();
-        assertEquals(500, response.getStatus());
         verify(datasetManager).getDatasetRecord(record1.getResource());
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -477,11 +480,11 @@ public class DatasetRestTest extends MobiRestTestCXF {
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()))
                 .queryParam("force", false).request().delete();
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
 
         response = target().path("datasets/" + encode(record1.getResource().stringValue()))
                 .queryParam("force", true).request().delete();
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -492,11 +495,11 @@ public class DatasetRestTest extends MobiRestTestCXF {
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()))
                 .queryParam("force", false).request().delete();
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
 
         response = target().path("datasets/" + encode(record1.getResource().stringValue()))
                 .queryParam("force", true).request().delete();
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
     }
 
     /* DELETE datasets/{datasetId}/data */
@@ -527,11 +530,11 @@ public class DatasetRestTest extends MobiRestTestCXF {
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .queryParam("force", false).request().delete();
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
 
         response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .queryParam("force", true).request().delete();
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -542,11 +545,11 @@ public class DatasetRestTest extends MobiRestTestCXF {
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .queryParam("force", false).request().delete();
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
 
         response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .queryParam("force", true).request().delete();
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
     }
 
     /* POST datasets/{datasetId}/data */
@@ -571,20 +574,20 @@ public class DatasetRestTest extends MobiRestTestCXF {
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "File is not in a valid RDF format");
         verify(importService, times(0)).importInputStream(any(ImportServiceConfig.class), any(InputStream.class), eq(true));
     }
 
     @Test
     public void uploadDataWithBadRequestTest() throws Exception {
         // Setup:
-        doThrow(new IllegalArgumentException()).when(importService).importInputStream(any(ImportServiceConfig.class), any(InputStream.class), eq(true));
+        doThrow(new IllegalArgumentException("Bad request")).when(importService).importInputStream(any(ImportServiceConfig.class), any(InputStream.class), eq(true));
         FormDataMultiPart fd = new FormDataMultiPart();
         fd.bodyPart("file", "test.ttl", getClass().getResourceAsStream("/test.ttl"));
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Bad request");
         verify(importService).importInputStream(any(ImportServiceConfig.class), any(InputStream.class), eq(true));
     }
 
@@ -597,7 +600,8 @@ public class DatasetRestTest extends MobiRestTestCXF {
 
         Response response = target().path("datasets/" + encode(record1.getResource().stringValue()) + "/data")
                 .request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(500, response.getStatus());
+        assertErrorResponse(response, 400, "MobiException", "Error importing dataset data");
         verify(importService).importInputStream(any(ImportServiceConfig.class), any(InputStream.class), eq(true));
     }
+
 }

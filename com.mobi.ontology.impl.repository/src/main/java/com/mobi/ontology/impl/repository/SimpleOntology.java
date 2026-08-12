@@ -12,21 +12,24 @@ package com.mobi.ontology.impl.repository;
  * it under the terms of the GNU Affero General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * #L%
  */
 
+import static com.mobi.persistence.utils.rio.Rio.write;
+
 import com.mobi.catalog.api.BranchManager;
 import com.mobi.catalog.api.CommitManager;
 import com.mobi.catalog.api.builder.Difference;
 import com.mobi.catalog.api.ontologies.mcat.Branch;
+import com.mobi.catalog.api.RecordPrefixManager;
 import com.mobi.catalog.config.CatalogConfigProvider;
 import com.mobi.dataset.api.DatasetConnection;
 import com.mobi.dataset.api.DatasetUtilsService;
@@ -65,6 +68,7 @@ import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.DynamicModelFactory;
+import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
 import org.eclipse.rdf4j.model.vocabulary.OWL;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
@@ -344,7 +348,7 @@ public class SimpleOntology implements Ontology {
 
         try (DatasetConnection conn = getDatasetConnection()) {
             List<Statement> imports = QueryResults.asList(conn.getStatements(datasetIRI,
-                    vf.createIRI(OWL.IMPORTS.stringValue()), null, datasetIRI));
+                    OWL.IMPORTS, null, datasetIRI));
             imports.forEach(imported -> importsClosure.add((IRI) imported.getObject()));
             List<Statement> unresolved = QueryResults.asList(conn.getStatements(datasetIRI,
                     vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI));
@@ -405,7 +409,7 @@ public class SimpleOntology implements Ontology {
 
         try (RepositoryConnection conn = cacheRepo.getConnection()) {
             boolean datasetIriExists = ConnectionUtils.containsContext(conn, datasetIRI);
-            boolean datasetSdNgExists = ConnectionUtils.containsContext(conn, 
+            boolean datasetSdNgExists = ConnectionUtils.containsContext(conn,
                     OntologyDatasets.createSystemDefaultNamedGraphIRI(datasetIRI));
             boolean catalogImport = datasetIRI.stringValue().startsWith(OntologyDatasets.DEFAULT_DS_NAMESPACE);
 
@@ -414,13 +418,13 @@ public class SimpleOntology implements Ontology {
                 this.importsClosure = new HashSet<>();
                 this.unresolvedImports = new HashSet<>();
                 QueryResults.asList(conn.getStatements(datasetIRI,
-                        vf.createIRI(OWL.IMPORTS.stringValue()), null, datasetIRI))
+                                OWL.IMPORTS, null, datasetIRI))
                         .stream()
                         .map(Statement::getObject)
                         .map(imported -> (IRI) imported)
                         .forEach(importsClosure::add);
                 QueryResults.asList(conn.getStatements(datasetIRI,
-                        vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI))
+                                vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI))
                         .stream()
                         .map(Statement::getObject)
                         .map(imported -> (IRI) imported)
@@ -543,9 +547,9 @@ public class SimpleOntology implements Ontology {
     /**
      * Generates an {@link OutputStream} of the Ontology in the provided RDFFormat.
      *
-     * @param skolemize A boolean indicating if blank nodes should be skolemized.
+     * @param skolemize   A boolean indicating if blank nodes should be skolemized.
      * @param prettyPrint A boolean indicating if the result should be pretty printed.
-     * @param format The {@link RDFFormat} to write to the OutputStream.
+     * @param format      The {@link RDFFormat} to write to the OutputStream.
      * @return An {@link OutputStream} of the RDF data.
      */
     private ByteArrayOutputStream getOntologyOutputStream(boolean skolemize, boolean prettyPrint, RDFFormat format) {
@@ -556,14 +560,14 @@ public class SimpleOntology implements Ontology {
     /**
      * Writes to the provided {@link OutputStream} of the Ontology in the provided RDFFormat.
      *
-     * @param skolemize A boolean indicating if blank nodes should be skolemized.
-     * @param prettyPrint A boolean indicating if the result should be pretty printed.
-     * @param format The {@link RDFFormat} to write to the OutputStream.
+     * @param skolemize    A boolean indicating if blank nodes should be skolemized.
+     * @param prettyPrint  A boolean indicating if the result should be pretty printed.
+     * @param format       The {@link RDFFormat} to write to the OutputStream.
      * @param outputStream The {@link OutputStream} to write to.
      * @return The modified {@link OutputStream}.
      */
     private <T extends OutputStream> T getOntologyOutputStream(boolean skolemize, boolean prettyPrint, RDFFormat format,
-                                                          T outputStream) {
+                                                               T outputStream) {
         long startTime = getStartTime();
         try (DatasetConnection conn = getDatasetConnection()) {
             RepositoryResult<Statement> statements = conn.getStatements(null, null, null,
@@ -580,15 +584,7 @@ public class SimpleOntology implements Ontology {
                 rdfHandler = writer;
             }
 
-            RemoveContextHandler removeContextSH = new RemoveContextHandler(vf);
-            if (skolemize) {
-                SkolemizeHandler skolemizeSH = new SkolemizeHandler(bNodeService);
-                com.mobi.persistence.utils.rio.Rio.write(statements, rdfHandler, skolemizeSH,
-                        removeContextSH);
-            } else {
-                com.mobi.persistence.utils.rio.Rio.write(statements, rdfHandler, removeContextSH);
-            }
-
+            writeStatementsWithPrefixes(statements, rdfHandler, format, skolemize, null);
             undoApplyDifferenceIfPresent(conn);
         } catch (RDFHandlerException e) {
             throw new RDFHandlerException("Error while writing Ontology.", e);
@@ -619,7 +615,7 @@ public class SimpleOntology implements Ontology {
     public Set<IRI> getUnloadableImportIRIs() {
         try (DatasetConnection conn = getDatasetConnection()) {
             Set<IRI> unloadableImports = conn.getStatements(
-                    datasetIRI, vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI)
+                            datasetIRI, vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI)
                     .stream()
                     .map(Statement::getObject)
                     .filter(iri -> iri instanceof IRI)
@@ -671,7 +667,7 @@ public class SimpleOntology implements Ontology {
      */
     protected Set<IRI> getImportedOntologyIRIs(DatasetConnection conn) {
         List<Statement> importStatements = QueryResults.asList(conn.getStatements(null,
-                vf.createIRI(OWL.IMPORTS.stringValue()), null, conn.getSystemDefaultNamedGraph()));
+                OWL.IMPORTS, null, conn.getSystemDefaultNamedGraph()));
         return importStatements.stream()
                 .map(Statement::getObject)
                 .filter(iri -> iri instanceof IRI)
@@ -710,7 +706,7 @@ public class SimpleOntology implements Ontology {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
             List<Statement> statements = QueryResults.asList(conn.getStatements(null,
-                    vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.ANNOTATIONPROPERTY.stringValue()),
+                    RDF.TYPE, OWL.ANNOTATIONPROPERTY,
                     conn.getSystemDefaultNamedGraph()));
             Set<AnnotationProperty> annotationProperties = statements.stream()
                     .map(Statement::getSubject)
@@ -726,10 +722,10 @@ public class SimpleOntology implements Ontology {
     public boolean containsClass(IRI iri) {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
-            boolean containsOwl = conn.contains(iri, vf.createIRI(RDF.TYPE.stringValue()),
-                    vf.createIRI(OWL.CLASS.stringValue()));
-            boolean containsRdfs = conn.contains(iri, vf.createIRI(RDF.TYPE.stringValue()),
-                    vf.createIRI(RDFS.CLASS.stringValue()));
+            boolean containsOwl = conn.contains(iri, RDF.TYPE,
+                    OWL.CLASS);
+            boolean containsRdfs = conn.contains(iri, RDF.TYPE,
+                    RDFS.CLASS);
             undoApplyDifferenceIfPresent(conn);
             logTrace("containsClass(" + iri.stringValue() + ")", start);
             return containsOwl || containsRdfs;
@@ -802,8 +798,7 @@ public class SimpleOntology implements Ontology {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
             List<Statement> statements = QueryResults.asList(conn.getStatements(null,
-                    vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(com.mobi.ontologies.rdfs.Datatype.TYPE),
-                    conn.getSystemDefaultNamedGraph()));
+                    RDF.TYPE, RDFS.DATATYPE, conn.getSystemDefaultNamedGraph()));
             Set<Datatype> dataTypes = statements.stream()
                     .map(Statement::getSubject)
                     .filter(iri -> iri instanceof IRI)
@@ -820,7 +815,7 @@ public class SimpleOntology implements Ontology {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
             List<Statement> statements = QueryResults.asList(conn.getStatements(null,
-                    vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue()),
+                    RDF.TYPE, OWL.OBJECTPROPERTY,
                     conn.getSystemDefaultNamedGraph()));
             Set<ObjectProperty> objectProperties = statements.stream()
                     .map(Statement::getSubject)
@@ -837,7 +832,7 @@ public class SimpleOntology implements Ontology {
         long start = getStartTime();
         try (DatasetConnection conn = getDatasetConnection()) {
             List<Statement> statements = QueryResults.asList(conn.getStatements(iri,
-                    vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.OBJECTPROPERTY.stringValue())));
+                    RDF.TYPE, OWL.OBJECTPROPERTY));
             if (statements.size() > 0) {
                 Optional<ObjectProperty> objPropOpt = Optional.of(
                         new SimpleObjectProperty((IRI) statements.get(0).getSubject()));
@@ -856,7 +851,7 @@ public class SimpleOntology implements Ontology {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
             List<Statement> statements = QueryResults.asList(conn.getStatements(objectProperty.getIRI(),
-                    vf.createIRI(RDFS.RANGE.stringValue()), null));
+                    RDFS.RANGE, null));
             Set<Resource> resources = statements.stream()
                     .map(Statement::getObject)
                     .filter(iri -> iri instanceof IRI)
@@ -873,7 +868,7 @@ public class SimpleOntology implements Ontology {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
             List<Statement> statements = QueryResults.asList(conn.getStatements(null,
-                    vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue()),
+                    RDF.TYPE, OWL.DATATYPEPROPERTY,
                     conn.getSystemDefaultNamedGraph()));
             Set<DataProperty> dataProperties = statements.stream()
                     .map(Statement::getSubject)
@@ -890,7 +885,7 @@ public class SimpleOntology implements Ontology {
         long start = getStartTime();
         try (DatasetConnection conn = getDatasetConnection()) {
             List<Statement> statements = QueryResults.asList(conn.getStatements(iri,
-                    vf.createIRI(RDF.TYPE.stringValue()), vf.createIRI(OWL.DATATYPEPROPERTY.stringValue())));
+                    RDF.TYPE, OWL.DATATYPEPROPERTY));
             if (statements.size() > 0) {
                 Optional<DataProperty> dataPropOpt = Optional.of(
                         new SimpleDataProperty((IRI) statements.get(0).getSubject()));
@@ -909,7 +904,7 @@ public class SimpleOntology implements Ontology {
         try (DatasetConnection conn = getDatasetConnection()) {
             long start = getStartTime();
             List<Statement> statements = QueryResults.asList(conn.getStatements(dataProperty.getIRI(),
-                    vf.createIRI(RDFS.RANGE.stringValue()), null));
+                    RDFS.RANGE, null));
             Set<Resource> resources = statements.stream()
                     .map(Statement::getObject)
                     .filter(iri -> iri instanceof IRI)
@@ -1093,15 +1088,7 @@ public class SimpleOntology implements Ontology {
                 RDFWriter rdfWriter = Rio.createWriter(format, outputStream);
                 setWriterOptions(rdfWriter, format);
 
-                RemoveContextHandler removeContextSH = new RemoveContextHandler(vf);
-                if (skolemize) {
-                    SkolemizeHandler skolemizeSH = new SkolemizeHandler(bNodeService);
-                    assert statements != null;
-                    com.mobi.persistence.utils.rio.Rio.write(statements, rdfWriter, skolemizeSH,
-                            removeContextSH);
-                } else {
-                    com.mobi.persistence.utils.rio.Rio.write(statements, rdfWriter, removeContextSH);
-                }
+                writeStatementsWithPrefixes(statements, rdfWriter, format, skolemize, null);
                 statements.close();
                 undoApplyDifferenceIfPresent(conn);
             } finally {
@@ -1113,7 +1100,7 @@ public class SimpleOntology implements Ontology {
     }
 
     public boolean getGraphQueryResultsStream(String queryString, boolean includeImports, RDFFormat format,
-                                                   boolean skolemize, Integer limit, OutputStream outputStream) {
+                                              boolean skolemize, Integer limit, OutputStream outputStream) {
         boolean limitExceeded = false;
         try (DatasetConnection conn = getDatasetConnection()) {
 
@@ -1130,26 +1117,12 @@ public class SimpleOntology implements Ontology {
                 RDFWriter rdfWriter = Rio.createWriter(format, outputStream);
                 setWriterOptions(rdfWriter, format);
 
-                RemoveContextHandler removeContextSH = new RemoveContextHandler(vf);
-                if (skolemize) {
-                    SkolemizeHandler skolemizeSH = new SkolemizeHandler(bNodeService);
-                    assert statements != null;
-
-                    if (limit != null) {
-                        limitExceeded = com.mobi.persistence.utils.rio.Rio.write(statements, rdfWriter, limit,
-                                skolemizeSH, removeContextSH);
-                    } else {
-                        com.mobi.persistence.utils.rio.Rio.write(statements, rdfWriter, skolemizeSH,
-                                removeContextSH);
-                    }
+                if (limit != null) {
+                    limitExceeded = writeStatementsWithPrefixes(statements, rdfWriter, format, skolemize, limit);
                 } else {
-                    if (limit != null) {
-                        limitExceeded = com.mobi.persistence.utils.rio.Rio.write(statements, rdfWriter, limit,
-                                removeContextSH);
-                    } else {
-                        com.mobi.persistence.utils.rio.Rio.write(statements, rdfWriter, removeContextSH);
-                    }
+                    writeStatementsWithPrefixes(statements, rdfWriter, format, skolemize, null);
                 }
+
                 statements.close();
                 undoApplyDifferenceIfPresent(conn);
             } finally {
@@ -1316,7 +1289,7 @@ public class SimpleOntology implements Ontology {
      * loaded into the cache (i.e, a web import) and generates the managing dataset graph for the datasetIRI.
      *
      * @param ontologyFile An optional {@link File} that contains ontology RDF if present
-     * @param webImport A boolean indicating if the ontology was resolved from the web
+     * @param webImport    A boolean indicating if the ontology was resolved from the web
      * @return A {@link Map} of two {@link Set}s of {@link IRI}s of the unresolvedImports and the importsClosure
      */
     private Map<String, Set<IRI>> loadOntologyIntoCache(@Nullable File ontologyFile, boolean webImport) {
@@ -1392,7 +1365,7 @@ public class SimpleOntology implements Ontology {
             }
             // Update dataset graph triples that track the imports closure and the unresolved imports
             processedImports.forEach(imported
-                    -> conn.add(datasetIRI, vf.createIRI(OWL.IMPORTS.stringValue()), imported, datasetIRI));
+                    -> conn.add(datasetIRI, OWL.IMPORTS, imported, datasetIRI));
             unresolvedImports.forEach(imported
                     -> conn.add(datasetIRI, vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), imported,
                     datasetIRI));
@@ -1411,9 +1384,9 @@ public class SimpleOntology implements Ontology {
      * generated from the ontologyIRI. If the Adds a timestamp to the datasetIRI graph if specified.
      *
      * @param ontologyFile An optional {@link File} of RDF data if present.
-     * @param datasetIRI The {@link IRI} of the dataset graph.
-     * @param ontologyIRI The {@link IRI} to generate the system default named graph from.
-     * @param conn The {@link RepositoryConnection} to add data to.
+     * @param datasetIRI   The {@link IRI} of the dataset graph.
+     * @param ontologyIRI  The {@link IRI} to generate the system default named graph from.
+     * @param conn         The {@link RepositoryConnection} to add data to.
      * @param addTimestamp A boolean indicating if a timestamp should be added to the datasetIRI graph.
      */
     private void addOntologyToRepo(@Nullable File ontologyFile, IRI datasetIRI, IRI ontologyIRI,
@@ -1441,12 +1414,12 @@ public class SimpleOntology implements Ontology {
      * Loads the provided ontologyFile into the provided named graph in the repository for the SimpleOntology.
      *
      * @param ontologyFile The RDF {@link File} of an Ontology to bulk load.
-     * @param graph The {@link Resource} specifying what graph to load the ontologyFile into.
+     * @param graph        The {@link Resource} specifying what graph to load the ontologyFile into.
      */
     private void loadOntologyFile(File ontologyFile, Resource graph) {
         long importTimeStart = System.currentTimeMillis();
         try (RepositoryConnection conn = repository.getConnection();
-                InputStream is = new FileInputStream(ontologyFile)) {
+             InputStream is = new FileInputStream(ontologyFile)) {
             RDFParser parser = Rio.createParser(RDFFormat.TURTLE);
             ParserConfig parserConfig = new ParserConfig();
             parserConfig.set(TurtleParserSettings.ACCEPT_TURTLESTAR, false);
@@ -1475,9 +1448,9 @@ public class SimpleOntology implements Ontology {
      * Updates the tracking collections for imports. Marks the provided ontologyId as processed and determines if the
      * ontologyId's direct imports have been processed. If not, they are added to the list of importsToProcess.
      *
-     * @param ontologyIRI The {@link IRI} identifying the {@link Ontology} that is being processed.
-     * @param ontologyImports The {@link List} of {@link IRI}s that represent the direct imports of the ontologyId
-     *                        that was processed.
+     * @param ontologyIRI      The {@link IRI} identifying the {@link Ontology} that is being processed.
+     * @param ontologyImports  The {@link List} of {@link IRI}s that represent the direct imports of the ontologyId
+     *                         that was processed.
      * @param processedImports A {@link Set} of {@link IRI}s that represent the imports that have already been
      *                         processed.
      * @param importsToProcess The {@link List} of {@link IRI}s that represent the imports that have not been
@@ -1497,14 +1470,14 @@ public class SimpleOntology implements Ontology {
      * Gets the direct imports on the provided ontologyIRI that has been loaded into cache. Queries the provided
      * system default named graph (ontologySdNg) for the import statements.
      *
-     * @param ontologyIRI The {@link IRI} of the ontology to query for import statements.
+     * @param ontologyIRI  The {@link IRI} of the ontology to query for import statements.
      * @param ontologySdNg The {@link IRI} of the system default named graph the provided ontologyIRI has been loaded
      *                     into.
-     * @param conn The {@link RepositoryConnection} to the ontologyCache.
+     * @param conn         The {@link RepositoryConnection} to the ontologyCache.
      * @return A {@link List} of {@link IRI}s of the imports directly on the provided ontologyIRI.
      */
     private List<IRI> getDirectImports(IRI ontologyIRI, IRI ontologySdNg, RepositoryConnection conn) {
-        return conn.getStatements(ontologyIRI, vf.createIRI(OWL.IMPORTS.stringValue()), null, ontologySdNg)
+        return conn.getStatements(ontologyIRI, OWL.IMPORTS, null, ontologySdNg)
                 .stream()
                 .map(Statement::getObject)
                 .filter(o -> o instanceof IRI)
@@ -1520,8 +1493,8 @@ public class SimpleOntology implements Ontology {
      */
     private IRI getOntologyIRI(RepositoryConnection conn) {
         Model ontologyDefModel = QueryResults.asModel(
-                conn.getStatements(null, vf.createIRI(RDF.TYPE.stringValue()),
-                        vf.createIRI(OWL.ONTOLOGY.stringValue()),
+                conn.getStatements(null, RDF.TYPE,
+                        OWL.ONTOLOGY,
                         OntologyDatasets.createSystemDefaultNamedGraphIRI(datasetIRI)), mf);
         return OntologyModels.findFirstOntologyIRI(ontologyDefModel).orElse(datasetIRI);
     }
@@ -1586,7 +1559,7 @@ public class SimpleOntology implements Ontology {
     private void addTemporaryImports(DatasetConnection conn) {
         // Gather all the added imports
         List<IRI> addedImports = difference.getAdditions()
-                .filter(null, vf.createIRI(OWL.IMPORTS.stringValue()), null)
+                .filter(null, OWL.IMPORTS, null)
                 .stream()
                 .map(Statement::getObject)
                 .filter(iri -> iri instanceof IRI)
@@ -1629,8 +1602,8 @@ public class SimpleOntology implements Ontology {
      */
     private void removeImports(DatasetConnection conn) {
         // Get the removed imports list
-        List<IRI> removedImports = difference.getDeletions().filter(null, vf.createIRI(OWL.IMPORTS.stringValue()),
-                null)
+        List<IRI> removedImports = difference.getDeletions().filter(null, OWL.IMPORTS,
+                        null)
                 .stream()
                 .map(Statement::getObject)
                 .filter(iri -> iri instanceof IRI)
@@ -1643,7 +1616,7 @@ public class SimpleOntology implements Ontology {
 
             // Get all unresolved imports including Difference
             Set<IRI> updatedUnresolvedImports = conn.getStatements(datasetIRI,
-                    vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI)
+                            vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI)
                     .stream()
                     .map(Statement::getObject)
                     .filter(obj -> obj instanceof IRI)
@@ -1651,14 +1624,15 @@ public class SimpleOntology implements Ontology {
                     .collect(Collectors.toSet());
             directImports.removeAll(updatedUnresolvedImports);
 
-            // Calculate any newly added unresolved imports and add to temporary unresolved set
-            updatedUnresolvedImports.removeAll(this.unresolvedImports);
+            // Calculate unresolved imports for updated state: existing unresolved minus explicitly removed, plus any
+            // newly added unresolved imports (added by addTemporaryImports prior to this method running)
+            updatedUnresolvedImports.removeAll(removedImports);
             Set<IRI> unresolved = new HashSet<>(updatedUnresolvedImports);
 
             // Add the ontologyIRI of this to the imports closure
             Set<IRI> importClosureIris = new HashSet<>();
-            conn.getStatements(null, vf.createIRI(RDF.TYPE.stringValue()),
-                    vf.createIRI(OWL.ONTOLOGY.stringValue()), conn.getSystemDefaultNamedGraph())
+            conn.getStatements(null, RDF.TYPE,
+                            OWL.ONTOLOGY, conn.getSystemDefaultNamedGraph())
                     .stream().map(Statement::getSubject)
                     .filter(iri -> iri instanceof IRI)
                     .map(iri -> (IRI) iri)
@@ -1680,7 +1654,7 @@ public class SimpleOntology implements Ontology {
             });
 
             // Clear existing imports closure and default graphs on the datasetIRI graph
-            conn.remove(datasetIRI, vf.createIRI(OWL.IMPORTS.stringValue()), null, datasetIRI);
+            conn.remove(datasetIRI, OWL.IMPORTS, null, datasetIRI);
             conn.remove(datasetIRI, vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, datasetIRI);
             conn.remove(datasetIRI, vf.createIRI(Dataset.defaultNamedGraph_IRI), null, datasetIRI);
 
@@ -1690,15 +1664,15 @@ public class SimpleOntology implements Ontology {
             // Add the default graphs and imports statements for the updated closure
             IRI ontologyIRI = getOntologyIRI(conn);
             importClosureIris.forEach(iri -> {
-                IRI importDatasetIRI = getDatasetIRI(iri);
-                if (importDatasetIRI.equals(ontologyIRI)) {
-                    // DatasetIRI doesn't exist for newly updated ontologyIRI
+                if (iri.equals(ontologyIRI)) {
+                    // Use the current connection's SdNg directly to correctly support branch ontologies
                     conn.addDefaultNamedGraph(conn.getSystemDefaultNamedGraph());
                 } else {
+                    IRI importDatasetIRI = getDatasetIRI(iri);
                     IRI importDatasetSdNg = OntologyDatasets.createSystemDefaultNamedGraphIRI(importDatasetIRI);
                     conn.addDefaultNamedGraph(importDatasetSdNg);
                 }
-                conn.add(datasetIRI, vf.createIRI(OWL.IMPORTS.stringValue()), iri, datasetIRI);
+                conn.add(datasetIRI, OWL.IMPORTS, iri, datasetIRI);
             });
             // Add the unresolved statements for the updated closure
             unresolved.forEach(iri ->
@@ -1710,10 +1684,10 @@ public class SimpleOntology implements Ontology {
      * Loads the import of an Ontology retrieved from the web into the cache. Updates import statements on datasetIRI
      * graph.
      *
-     * @param importedDatasetIRI The datasetIRI of the import.
+     * @param importedDatasetIRI  The datasetIRI of the import.
      * @param importedDatasetSdNg The datasetSdNg of the import.
-     * @param ontologyFile The {@link File} of web resolved ontology to load.
-     * @param conn The {@link DatasetConnection} used to update the dataset graph with the new import.
+     * @param ontologyFile        The {@link File} of web resolved ontology to load.
+     * @param conn                The {@link DatasetConnection} used to update the dataset graph with the new import.
      */
     private void createTempImportNotInCacheWeb(IRI importedDatasetIRI, IRI importedDatasetSdNg, File ontologyFile,
                                                DatasetConnection conn) {
@@ -1731,11 +1705,11 @@ public class SimpleOntology implements Ontology {
      * Loads the import of an Ontology retrieved from the catalog into the cache. Updates import statements on
      * datasetIRI graph.
      *
-     * @param importedDatasetIRI The datasetIRI of the import.
+     * @param importedDatasetIRI  The datasetIRI of the import.
      * @param importedDatasetSdNg The datasetSdNg of the import.
-     * @param ontologyFile The {@link File} of catalog resolved ontology to load.
-     * @param imported The IRI of the imported ontology.
-     * @param conn The {@link DatasetConnection} used to update the dataset graph with the new import.
+     * @param ontologyFile        The {@link File} of catalog resolved ontology to load.
+     * @param imported            The IRI of the imported ontology.
+     * @param conn                The {@link DatasetConnection} used to update the dataset graph with the new import.
      */
     private void createTempImportNotInCacheLocal(IRI importedDatasetIRI, IRI importedDatasetSdNg, File ontologyFile,
                                                  IRI imported,
@@ -1758,9 +1732,9 @@ public class SimpleOntology implements Ontology {
      * Adds the import of an Ontology that exists the cache to the dataset graph. Updates import statements on
      * datasetIRI graph.
      *
-     * @param importedDatasetIRI The datasetIRI of the import.
+     * @param importedDatasetIRI  The datasetIRI of the import.
      * @param importedDatasetSdNg The datasetSdNg of the import.
-     * @param conn The {@link DatasetConnection} used to update the dataset graph with the new import.
+     * @param conn                The {@link DatasetConnection} used to update the dataset graph with the new import.
      */
     private void createTempImportExistsInCache(IRI importedDatasetIRI, IRI importedDatasetSdNg,
                                                DatasetConnection conn) {
@@ -1777,27 +1751,27 @@ public class SimpleOntology implements Ontology {
     /**
      * Updates the dataset graph identified by the datasetIRI with a new import statement for the importedDatasetIRI.
      *
-     * @param importedDatasetIRI The {@link IRI} to add to the dataset graphs imports.
+     * @param importedDatasetIRI  The {@link IRI} to add to the dataset graphs imports.
      * @param importedDatasetSdNg The {@link IRI} to add as a default graph to the datasetIRI graph.
-     * @param conn The {@link DatasetConnection} to add the import statement to.
+     * @param conn                The {@link DatasetConnection} to add the import statement to.
      */
     private void updateImportStatements(IRI importedDatasetIRI, IRI importedDatasetSdNg, DatasetConnection conn) {
         conn.addDefaultNamedGraph(importedDatasetSdNg);
         Set<IRI> failedImportStatements = QueryResults.asList(conn.getStatements(
-                importedDatasetIRI, vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, importedDatasetIRI))
+                        importedDatasetIRI, vf.createIRI(OntologyDatasets.UNRESOLVED_IRI_STRING), null, importedDatasetIRI))
                 .stream()
                 .map(Statement::getObject)
                 .filter(iri -> iri instanceof IRI)
                 .map(iri -> (IRI) iri)
                 .collect(Collectors.toSet());
         List<Statement> importStatements = QueryResults.asList(conn.getStatements(
-                importedDatasetIRI, vf.createIRI(OWL.IMPORTS.stringValue()), null, importedDatasetIRI));
+                importedDatasetIRI, OWL.IMPORTS, null, importedDatasetIRI));
         importStatements.stream()
                 .map(Statement::getObject)
                 .filter(iri -> iri instanceof IRI)
                 .map(iri -> (IRI) iri)
                 .forEach(importIRI -> {
-                    conn.add(datasetIRI, vf.createIRI(OWL.IMPORTS.stringValue()), importIRI, datasetIRI);
+                    conn.add(datasetIRI, OWL.IMPORTS, importIRI, datasetIRI);
                     if (!failedImportStatements.contains(importIRI)) {
                         conn.addDefaultNamedGraph(OntologyDatasets.createSystemDefaultNamedGraphIRI(
                                 getDatasetIRI(importIRI)));
@@ -1849,7 +1823,7 @@ public class SimpleOntology implements Ontology {
      * Logs the methodName and time it took to run if log TRACE is enabled.
      *
      * @param methodName The name of the method to log.
-     * @param start A long of the system time in milliseconds from when the method was first started.
+     * @param start      A long of the system time in milliseconds from when the method was first started.
      */
     private void logTrace(String methodName, Long start) {
         if (LOG.isTraceEnabled()) {
@@ -1858,14 +1832,13 @@ public class SimpleOntology implements Ontology {
     }
 
     /**
-     *  Checks to see if entities are subclassing each other in a circular manner.
+     * Checks to see if entities are subclassing each other in a circular manner.
      *
      * @param parentMap A map that contains the most up-to-date parent-to-child relationships
      * @param parentIRI The parent entity in a parent/child set
-     * @param childIRI The child entity in a parent/child set
-     * @param root The top level child element for a circular relationship
-     * @param path A set of entities that are along the path to the circular entity if there is one
-     *
+     * @param childIRI  The child entity in a parent/child set
+     * @param root      The top level child element for a circular relationship
+     * @param path      A set of entities that are along the path to the circular entity if there is one
      */
     private Map<String, Object> checkChildren(Map<String, Set<String>> parentMap, String parentIRI, String childIRI,
                                               String root, Set<String> path) {
@@ -1906,4 +1879,40 @@ public class SimpleOntology implements Ontology {
             return commitManager.getHeadCommitIRI(masterBranch);
         }
     }
+
+    private boolean writeStatementsWithPrefixes(Iterable<Statement> statements, RDFHandler rdfHandler,
+                                                RDFFormat format, boolean skolemize, Integer limit) {
+        boolean limitExceeded = false;
+        RemoveContextHandler removeContextSH = new RemoveContextHandler(vf);
+
+        //adding prefixes
+        if (!format.equals(RDFFormat.JSONLD)) {
+            if (statements instanceof Model) {
+                RecordPrefixManager.STANDARD_PREFIXES.forEach(((Model) statements)::setNamespace);
+            } else {
+                Model transformedStatements = new LinkedHashModel();
+                statements.forEach(transformedStatements::add);
+                RecordPrefixManager.STANDARD_PREFIXES.forEach(transformedStatements::setNamespace);
+                statements = transformedStatements;
+            }
+        }
+
+        //handling writing output
+        if (skolemize) {
+            SkolemizeHandler skolemizeSH = new SkolemizeHandler(bNodeService);
+            if (limit != null) {
+                limitExceeded = write(statements, rdfHandler, limit, skolemizeSH, removeContextSH);
+            } else {
+                write(statements, rdfHandler, skolemizeSH, removeContextSH);
+            }
+        } else {
+            if (limit != null) {
+                limitExceeded = write(statements, rdfHandler, limit, removeContextSH);
+            } else {
+                write(statements, rdfHandler, removeContextSH);
+            }
+        }
+        return limitExceeded;
+    }
+
 }

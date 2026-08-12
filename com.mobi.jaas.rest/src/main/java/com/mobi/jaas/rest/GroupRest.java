@@ -39,14 +39,19 @@ import com.mobi.jaas.api.ontologies.usermanagement.Group;
 import com.mobi.jaas.api.ontologies.usermanagement.GroupFactory;
 import com.mobi.jaas.api.ontologies.usermanagement.Role;
 import com.mobi.jaas.api.ontologies.usermanagement.User;
-import com.mobi.rest.util.ErrorUtils;
+import com.mobi.rest.util.MobiNotFoundException;
 import com.mobi.rest.util.RestUtils;
+import com.mobi.rest.util.swagger.ErrorObjectSchema;
+import com.mobi.rest.util.swagger.JsonLdObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.Explode;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.apache.commons.lang3.StringUtils;
 import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.Resource;
@@ -84,16 +89,19 @@ import javax.ws.rs.core.Response;
 @JaxrsResource
 @Path("/groups")
 public class GroupRest {
-    private EngineManager engineManager;
-    private final ValueFactory vf = new ValidatingValueFactory();
-    private GroupFactory groupFactory;
-    private Engine rdfEngine;
     private final Logger logger = LoggerFactory.getLogger(GroupRest.class);
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private final ValueFactory vf = new ValidatingValueFactory();
 
+    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final String TAG_NAME = "Group";
+    private static final String TAG_DESC = "Operations for managing groups, their roles, and members";
     private static final String GROUP = "Group ";
     private static final String TITLE_PROVIDED = "Group title must be provided";
     private static final String NOT_FOUND = " not found";
+
+    private EngineManager engineManager;
+    private GroupFactory groupFactory;
+    private Engine rdfEngine;
 
     @Reference
     void setEngineManager(EngineManager engineManager) {
@@ -116,16 +124,32 @@ public class GroupRest {
      * @return Response with a JSON-LD list of the {@link Group}s in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "groups",
-            summary = "Get all Mobi Groups",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response with a JSON-LD list of the Groups in Mobi"),
-            }
-    )
+    @Operation(summary = "Retrieves all Groups")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON-LD list of the Groups",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving Groups",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getGroups() {
         try {
             ArrayNode result = engineManager.getGroups().stream()
@@ -135,9 +159,9 @@ public class GroupRest {
                     .collect(mapper::createArrayNode, ArrayNode::add, ArrayNode::add);
             return Response.ok(result).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (IllegalStateException | MobiException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 
@@ -151,17 +175,37 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @POST
-    @RolesAllowed("admin")
-    @Operation(
-            tags = "groups",
-            summary = "Create a new Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "201",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Produces(MediaType.TEXT_PLAIN)
     @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @RolesAllowed("admin")
+    @Operation(
+            summary = "Creates a new Group",
+            description = "Requires the 'admin' role."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "The title of the created Group"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
+
     public Response createGroup(
             @Parameter(schema = @Schema(type = "string",
                     description = "Title of the Group", required = true))
@@ -180,7 +224,7 @@ public class GroupRest {
         checkStringParam(title, "Group title is required");
         try {
             if (engineManager.groupExists(title)) {
-                throw ErrorUtils.sendError(GROUP+ title + " already exists", Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(GROUP + title + " already exists"));
             }
 
             GroupConfig.Builder builder = new GroupConfig.Builder(title);
@@ -203,11 +247,11 @@ public class GroupRest {
             Group group = engineManager.createGroup(rdfEngine.getEngineName(), builder.build());
             engineManager.storeGroup(rdfEngine.getEngineName(), group);
             logger.info("Created group " + title);
-            Value createGroupTitle = group.getProperty(vf.createIRI(DCTERMS.TITLE.stringValue())).orElseThrow(() ->
-                    ErrorUtils.sendError("Group title must be present in created group", Response.Status.BAD_REQUEST));
+            Value createGroupTitle = group.getProperty(DCTERMS.TITLE).orElseThrow(() ->
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Group title must be present in created group")));
             return Response.status(201).entity(createGroupTitle.stringValue()).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -218,33 +262,48 @@ public class GroupRest {
      * @return Response with a JSON representation of the Group in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}")
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "groups",
-            summary = "Get a single Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response with a JSON representation of the Group in Mobi"),
-            }
-    )
+    @Operation(summary = "Retrieves a specific Group by title")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON-LD representation of the Group"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getGroup(
             @Parameter(description = "Title of the Group to retrieve", required = true)
             @PathParam("groupTitle") String groupTitle) {
         if (StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError(TITLE_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(TITLE_PROVIDED));
         }
 
         try {
             Group group = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.NOT_FOUND));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
 
             String json = groupedModelToString(group.getModel().filter(group.getResource(), null, null),
                     getRDFFormat("jsonld"));
             return Response.ok(getObjectFromJsonld(json)).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -256,51 +315,79 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}")
+    @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed("admin")
     @Operation(
-            tags = "groups",
-            summary = "Update a Mobi Group's information",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
+            summary = "Updates a Group's information",
+            description = "Requires the 'admin' role."
     )
-    @Consumes(MediaType.APPLICATION_JSON)
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Group successfully updated",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while updating the Group",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     public Response updateGroup(
             @Parameter(description = "Title of the Group to update", required = true)
             @PathParam("groupTitle") String groupTitle,
             @Parameter(description = "JSON-LD string representation of a Group to replace the existing Group",
                     required = true) String newGroupStr) {
         if (StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError(TITLE_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(TITLE_PROVIDED));
         }
 
         Model groupModel = jsonldToModel(newGroupStr);
-        Set<Resource> subjects = groupModel.filter(null, vf.createIRI(RDF.TYPE.stringValue()),
+        Set<Resource> subjects = groupModel.filter(null, RDF.TYPE,
                 vf.createIRI(Group.TYPE)).subjects();
         if (subjects.size() < 1) {
-            throw ErrorUtils.sendError("Group must have an ID", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Group must have an ID"));
         }
         Group newGroup = groupFactory.createNew(subjects.iterator().next(), groupModel);
 
-        Value title = newGroup.getProperty(vf.createIRI(DCTERMS.TITLE.stringValue())).orElseThrow(() ->
-                ErrorUtils.sendError("Group title must be present in new group", Response.Status.BAD_REQUEST));
+        Value title = newGroup.getProperty(DCTERMS.TITLE).orElseThrow(() ->
+                RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Group title must be present in new group")));
         if (!groupTitle.equals(title.stringValue())) {
-            throw ErrorUtils.sendError("Provided group title and the group title in the data must match",
-                    Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Provided group title and the group title in the data must match"));
         }
 
         try {
             Group savedGroup = engineManager.retrieveGroup(rdfEngine.getEngineName(), groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
-            Optional<Value> savedGroupTitle = savedGroup.getProperty(vf.createIRI(DCTERMS.TITLE.stringValue()));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
+            Optional<Value> savedGroupTitle = savedGroup.getProperty(DCTERMS.TITLE);
             if (!savedGroupTitle.isPresent()) {
-                throw ErrorUtils.sendError("Group must have a title", Response.Status.INTERNAL_SERVER_ERROR);
+                throw RestUtils.getErrorObjInternalServerError(new MobiException("Group must have a title"));
             }
             if (!savedGroupTitle.get().equals(title)) {
-                throw ErrorUtils.sendError("Group titles must match", Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Group titles must match"));
             }
             if (!savedGroup.getHasGroupRole().isEmpty()) {
                 newGroup.setHasGroupRole(savedGroup.getHasGroupRole());
@@ -312,7 +399,7 @@ public class GroupRest {
             engineManager.updateGroup(rdfEngine.getEngineName(), newGroup);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -323,33 +410,54 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}")
     @RolesAllowed("admin")
     @Operation(
-            tags = "groups",
-            summary = "Remove a Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
+            summary = "Deletes a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Group successfully deleted",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response deleteGroup(
             @Parameter(description = "Title of the Group to remove", required = true)
             @PathParam("groupTitle") String groupTitle) {
         if (StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError(TITLE_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(TITLE_PROVIDED));
         }
         try {
             if (!engineManager.groupExists(groupTitle)) {
-                throw ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND));
             }
 
             engineManager.deleteGroup(rdfEngine.getEngineName(), groupTitle);
             logger.info("Deleted group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -360,28 +468,43 @@ public class GroupRest {
      * @return Response with a JSON array of the roles of the Group in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}/roles")
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "groups",
-            summary = "List roles of a Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response with a JSON array of the roles of the Group in Mobi"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
-    )
+    @Operation(summary = "Retrieves the Roles of a Group")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON-LD array of the roles of the Group",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getGroupRoles(
             @Parameter(description = "Title of the Group to retrieve roles from", required = true)
             @PathParam("groupTitle") String groupTitle) {
         if (StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError(TITLE_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(TITLE_PROVIDED));
         }
 
         try {
             Group group = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
 
             ArrayNode result = group.getHasGroupRole().stream()
                     .map(role -> role.getModel().filter(role.getResource(), null, null))
@@ -390,7 +513,7 @@ public class GroupRest {
                     .collect(mapper::createArrayNode, ArrayNode::add, ArrayNode::add);
             return Response.ok(result).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -402,17 +525,38 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}/roles")
     @RolesAllowed("admin")
     @Operation(
-            tags = "groups",
-            summary = "Add roles to a Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
+            summary = "Adds Roles to a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Roles successfully added to the Group",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response addGroupRoles(
             @Parameter(description = "Title of the Group to add a role to", required = true)
             @PathParam("groupTitle") String groupTitle,
@@ -422,20 +566,20 @@ public class GroupRest {
                     schema = @Schema(implementation = String.class, description = "Role")))
             @QueryParam("roles") List<String> roles) {
         if (StringUtils.isEmpty(groupTitle) || roles.isEmpty()) {
-            throw ErrorUtils.sendError("Both group title and roles must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both group title and roles must be provided"));
         }
         try {
             Group savedGroup = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
             roles.stream()
                     .map(s -> engineManager.getRole(s).orElseThrow(() ->
-                            ErrorUtils.sendError("Role " + s + NOT_FOUND, Response.Status.BAD_REQUEST)))
+                            RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Role " + s + NOT_FOUND))))
                     .forEach(savedGroup::addHasGroupRole);
             engineManager.updateGroup(savedGroup);
             logger.info("Role(s) " + String.join(", ", roles) + " to group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -447,37 +591,58 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}/roles")
     @RolesAllowed("admin")
     @Operation(
-            tags = "groups",
-            summary = "Remove role from a Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
+            summary = "Removes a Role from a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Role successfully removed from the Group",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response removeGroupRole(
             @Parameter(description = "Title of the Group to remove a role from", required = true)
             @PathParam("groupTitle") String groupTitle,
             @Parameter(description = "Role to remove from the specified Group", required = true)
             @QueryParam("role") String role) {
         if (StringUtils.isEmpty(groupTitle) || StringUtils.isEmpty(role)) {
-            throw ErrorUtils.sendError("Both group title and role must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both group title and role must be provided"));
         }
 
         try {
             Group savedGroup = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
             Role roleObj = engineManager.getRole(role).orElseThrow(() ->
-                    ErrorUtils.sendError("Role " + role + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Role " + role + NOT_FOUND)));
             savedGroup.removeHasGroupRole(roleObj);
             engineManager.updateGroup(savedGroup);
             logger.info("Removed role " + role + " from group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -488,35 +653,53 @@ public class GroupRest {
      * @return Response with a JSON array of the users of the Group in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}/users")
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "groups",
-            summary = "List users of a Mobi Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response with a JSON array of the users for the specified Group in Mobi"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves the Users in a Group")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON-LD array of the users for the specified Group",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving Group Users",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getGroupUsers(
             @Parameter(description = "Title of the Group to retrieve users from", required = true)
             @PathParam("groupTitle") String groupTitle) {
         if (StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError(TITLE_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(TITLE_PROVIDED));
         }
 
         try {
             Group savedGroup = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
             Set<User> members = savedGroup.getMember_resource().stream()
                     .map(iri -> engineManager.getUsername(iri).orElseThrow(() ->
-                            ErrorUtils.sendError("Unable to get User: " + iri, Response.Status.INTERNAL_SERVER_ERROR)))
+                            RestUtils.getErrorObjInternalServerError(new MobiException("Unable to get User: " + iri))))
                     .map(username -> engineManager.retrieveUser(username).orElseThrow(() ->
-                            ErrorUtils.sendError("Unable to get User: " + username,
-                                    Response.Status.INTERNAL_SERVER_ERROR)))
+                            RestUtils.getErrorObjInternalServerError(new MobiException("Unable to get User: " + username))))
                     .collect(Collectors.toSet());
 
             ArrayNode result = members.stream()
@@ -529,7 +712,7 @@ public class GroupRest {
                     .collect(mapper::createArrayNode, ArrayNode::add, ArrayNode::add);
             return Response.ok(result).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -541,17 +724,43 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}/users")
     @RolesAllowed("admin")
     @Operation(
-            tags = "groups",
-            summary = "Add a Mobi User to a Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
+            summary = "Adds a User to a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User successfully added to the Group",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while adding the User to the Group",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response addGroupUser(
             @Parameter(description = "Title of the Group to add users to", required = true)
             @PathParam("groupTitle") String groupTitle,
@@ -561,20 +770,20 @@ public class GroupRest {
                     schema = @Schema(implementation = String.class, description = "username")))
             @QueryParam("users") List<String> usernames) {
         if (StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError(TITLE_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(TITLE_PROVIDED));
         }
         try {
             Group savedGroup = engineManager.retrieveGroup(rdfEngine.getEngineName(), groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
             usernames.stream()
                     .map(username -> engineManager.retrieveUser(username).orElseThrow(() ->
-                            ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST)))
+                            RestUtils.getErrorObjInternalServerError(new MobiException("User " + username + NOT_FOUND))))
                     .forEach(savedGroup::addMember);
             engineManager.updateGroup(rdfEngine.getEngineName(), savedGroup);
             logger.info("Added user(s) " + String.join(", ", usernames) + " to group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -586,37 +795,62 @@ public class GroupRest {
      * @return Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{groupTitle}/users")
     @RolesAllowed("admin")
     @Operation(
-            tags = "groups",
-            summary = "Remove a Mobi User from a Group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-            }
+            summary = "Removes a User from a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User successfully removed from the Group",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Group data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Group with the provided title does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while removing the User from the Group",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response removeGroupUser(
             @Parameter(description = "Title of the Group to remove a user from", required = true)
             @PathParam("groupTitle") String groupTitle,
             @Parameter(description = "Username of the user to remove from the Group", required = true)
             @QueryParam("user") String username) {
         if (StringUtils.isEmpty(groupTitle) || StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError("Both group title and username must be provided",
-                    Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both group title and username must be provided"));
         }
         try {
             Group savedGroup = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError(GROUP + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(GROUP + groupTitle + NOT_FOUND)));
             User savedUser = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjInternalServerError(new MobiException("User " + username + NOT_FOUND)));
             savedGroup.removeMember(savedUser);
             engineManager.updateGroup(savedGroup);
             logger.info("Removed user " + username + " from group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 }

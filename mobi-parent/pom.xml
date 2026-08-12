@@ -11,12 +11,12 @@
   it under the terms of the GNU Affero General Public License as published by
   the Free Software Foundation, either version 3 of the License, or
   (at your option) any later version.
-  
+
   This program is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
   GNU General Public License for more details.
-  
+
   You should have received a copy of the GNU Affero General Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
   #L%
@@ -28,7 +28,7 @@
 
     <groupId>com.mobi</groupId>
     <artifactId>mobi-parent</artifactId>
-    <version>4.3.0-SNAPSHOT</version>
+    <version>4.5.0-SNAPSHOT</version>
 
     <packaging>pom</packaging>
 
@@ -56,10 +56,10 @@
         <commons-fileupload.version>1.5</commons-fileupload.version>
         <commons-io.version>2.18.0</commons-io.version>
         <commons-lang.version>2.6</commons-lang.version>
-        <commons-lang3.version>3.12.0</commons-lang3.version>
+        <commons-lang3.version>3.14.0</commons-lang3.version>
         <commons-rdf-api.version>0.5.0</commons-rdf-api.version>
         <commons-validator.version>1.6</commons-validator.version>
-        <cxf.version>3.4.3</cxf.version>
+        <cxf.version>3.6.11</cxf.version>
         <ehcache.version>3.3.1</ehcache.version> <!-- 3.10.0 is out, but causes unsatisfied ehcache services -->
         <httpclient.version>4.5.14</httpclient.version>
         <httpcore.version>4.4.15</httpcore.version>
@@ -404,7 +404,7 @@
             <dependency>
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-lang3</artifactId>
-                <version>3.4</version>
+                <version>${commons-lang3.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
@@ -710,6 +710,7 @@
                         <configuration>
                             <configLocation>../google_checks.xml</configLocation>
                             <consoleOutput>true</consoleOutput>
+                            <excludeGeneratedSources>true</excludeGeneratedSources>
                         </configuration>
                         <goals>
                             <goal>check</goal>
@@ -850,6 +851,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
+                        <version>3.4.0</version>
                         <executions>
                             <execution>
                                 <id>attach-sources</id>

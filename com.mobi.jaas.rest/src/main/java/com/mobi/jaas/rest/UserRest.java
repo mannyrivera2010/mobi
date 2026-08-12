@@ -43,14 +43,19 @@ import com.mobi.jaas.api.ontologies.usermanagement.Role;
 import com.mobi.jaas.api.ontologies.usermanagement.User;
 import com.mobi.jaas.api.ontologies.usermanagement.UserFactory;
 import com.mobi.platform.config.api.state.StateManager;
-import com.mobi.rest.util.ErrorUtils;
+import com.mobi.rest.util.MobiNotFoundException;
 import com.mobi.rest.util.RestUtils;
+import com.mobi.rest.util.swagger.ErrorObjectSchema;
+import com.mobi.rest.util.swagger.JsonLdObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.Explode;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.apache.commons.lang3.StringUtils;
 import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.Resource;
@@ -92,9 +97,11 @@ import javax.ws.rs.core.Response;
 @Path("/users")
 public class UserRest {
     private final Logger logger = LoggerFactory.getLogger(UserRest.class);
-    private static final ObjectMapper mapper = new ObjectMapper();
-    static final String ADMIN_USER_IRI = "http://mobi.com/users/d033e22ae348aeb5660fc2140aec35850c4da997";
 
+    private static final ObjectMapper mapper = new ObjectMapper();
+    protected static final String ADMIN_USER_IRI = "http://mobi.com/users/d033e22ae348aeb5660fc2140aec35850c4da997";
+    private static final String TAG_NAME = "User";
+    private static final String TAG_DESC = "Operations for managing user accounts, roles, and group memberships";
     private static final String USERNAME_PROVIDED = "Username must be provided";
     private static final String NOT_FOUND = " not found";
     private static final String CURRENT_USERNAME_PROVIDED = "Current username must be provided";
@@ -126,16 +133,32 @@ public class UserRest {
      * @return a Response with a JSON-LD list of the {@link User}s in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "users",
-            summary = "Get all Mobi Users",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Operation(summary = "Retrieves the list of all Users")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "JSON-LD array with the list of Users",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving Users",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getUsers() {
         try {
             Set<User> users = engineManager.getUsers();
@@ -149,9 +172,9 @@ public class UserRest {
                     .collect(mapper::createArrayNode, ArrayNode::add, ArrayNode::add);
             return Response.ok(result).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (IllegalStateException | MobiException ex) {
-            throw ErrorUtils.sendError(ex, ex.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(ex);
         }
     }
 
@@ -168,15 +191,36 @@ public class UserRest {
      * @return Response indicating the success or failure of the request
      */
     @POST
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @RolesAllowed("admin")
-    @Operation(
-            tags = "users",
-            summary = "Create a Mobi User account",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Operation(summary = "Creates a new User account", description = "Requires the 'admin' role.")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "The username of the created User"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while creating the User",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @Produces(MediaType.TEXT_PLAIN)
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     public Response createUser(
@@ -200,14 +244,14 @@ public class UserRest {
                     description = "Optional email of the User to create"))
             @FormParam("email") String email) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(USERNAME_PROVIDED));
         }
         if (StringUtils.isEmpty(password)) {
-            throw ErrorUtils.sendError("Password must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Password must be provided"));
         }
         try {
             if (engineManager.userExists(username)) {
-                throw ErrorUtils.sendError("User already exists", Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("User already exists"));
             }
 
             Set<String> roleSet = new HashSet<>();
@@ -228,13 +272,13 @@ public class UserRest {
 
             User user = engineManager.createUser(rdfEngine.getEngineName(), builder.build());
             if (user.getUsername().isEmpty()) {
-                throw ErrorUtils.sendError("User must have a username", Response.Status.INTERNAL_SERVER_ERROR);
+                throw RestUtils.getErrorObjInternalServerError(new MobiException("User must have a username"));
             }
             engineManager.storeUser(rdfEngine.getEngineName(), user);
             logger.info("Created user " + user.getResource() + " with username " + username);
             return Response.status(201).entity(user.getUsername().get().stringValue()).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -245,32 +289,47 @@ public class UserRest {
      * @return a Response with a JSON representation of the specified User in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}")
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "users",
-            summary = "Get a single Mobi User",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Operation(summary = "Retrieves a specific User")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "JSON-LD of the User with the provided username"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getUser(
             @Parameter(description = "Username of the User to retrieve", required = true)
             @PathParam("username") String username) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(USERNAME_PROVIDED));
         }
         try {
             User user = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.NOT_FOUND));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             user.clearPassword();
             String json = groupedModelToString(user.getModel().filter(user.getResource(), null, null),
                     getRDFFormat("jsonld"));
             return Response.ok(getObjectFromJsonld(json)).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -284,54 +343,80 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}")
-    @RolesAllowed("user")
-    @Operation(
-            tags = "users",
-            summary = "Update a Mobi user's information",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("user")
+    @Operation(summary = "Updates a User's information")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User successfully updated",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while updating the User",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     public Response updateUser(
-            @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
             @Parameter(description = "Current username of the user to update", required = true)
             @PathParam("username") String username,
             @Parameter(description = "JSON-LD string representation of a User with the new information to update",
                     required = true)
                     String newUserStr) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(CURRENT_USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(CURRENT_USERNAME_PROVIDED));
         }
         isAuthorizedUser(servletRequest, username);
 
         try {
             Model userModel = jsonldToModel(newUserStr);
-            Set<Resource> subjects = userModel.filter(null, vf.createIRI(RDF.TYPE.stringValue()),
+            Set<Resource> subjects = userModel.filter(null, RDF.TYPE,
                     vf.createIRI(User.TYPE)).subjects();
             if (subjects.size() < 1) {
-                throw ErrorUtils.sendError("User must have an ID", Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("User must have an ID"));
             }
             User newUser = userFactory.createNew(subjects.iterator().next(), userModel);
 
             Value newUsername = newUser.getUsername().orElseThrow(() ->
-                    ErrorUtils.sendError("Username must be provided in new user", Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Username must be provided in new user")));
             if (!username.equals(newUsername.stringValue())) {
-                throw ErrorUtils.sendError("Provided username and the username in the data must match",
-                        Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Provided username and the username in the data must match"));
             }
             User savedUser = engineManager.retrieveUser(rdfEngine.getEngineName(), username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             if (savedUser.getUsername().isEmpty()) {
-                throw ErrorUtils.sendError("User must have a username", Response.Status.INTERNAL_SERVER_ERROR);
+                throw RestUtils.getErrorObjInternalServerError(new MobiException("User must have a username"));
             }
             if (savedUser.getPassword().isEmpty()) {
-                throw ErrorUtils.sendError(MUST_HAVE_PASSWORD, Response.Status.INTERNAL_SERVER_ERROR);
+                throw RestUtils.getErrorObjInternalServerError(new MobiException(MUST_HAVE_PASSWORD));
             }
             if (!savedUser.getUsername().get().equals(newUsername)) {
-                throw ErrorUtils.sendError("Usernames must match", Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Usernames must match"));
             }
 
             if (!savedUser.getHasUserRole().isEmpty()) {
@@ -342,7 +427,7 @@ public class UserRest {
             engineManager.updateUser(rdfEngine.getEngineName(), newUser);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -357,18 +442,40 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @POST
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/password")
     @RolesAllowed("user")
     @Operation(
-            tags = "users",
-            summary = "Changes a Mobi User's password if it is the User making the request",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
+            summary = "Changes the current User's password",
+            description = "Only the User making the request can change their own password."
+                    + "The current password must be provided."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User password successfully changed"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response changePassword(
-            @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
             @Parameter(description = "Current username of the user to update", required = true)
             @PathParam("username") String username,
             @Parameter(description = "Current password of the user to update", required = true)
@@ -376,22 +483,22 @@ public class UserRest {
             @Parameter(description = "New password for the user", required = true)
             @QueryParam("newPassword") String newPassword) {
         if (StringUtils.isEmpty(username)) {
-            throw RestUtils.getErrorObjBadRequest(new MobiException(CURRENT_USERNAME_PROVIDED));
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(CURRENT_USERNAME_PROVIDED));
         }
         checkCurrentUser(getActiveUsername(servletRequest), username);
         if (StringUtils.isEmpty(currentPassword)) {
-            throw RestUtils.getErrorObjBadRequest(new MobiException("Current password must be provided"));
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Current password must be provided"));
         }
         if (StringUtils.isEmpty(newPassword)) {
-            throw RestUtils.getErrorObjBadRequest(new MobiException("New password must be provided"));
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("New password must be provided"));
         }
         try {
             if (!engineManager.checkPassword(rdfEngine.getEngineName(), username, currentPassword)) {
-                throw RestUtils.getErrorObjBadRequest(new MobiException("Current password is wrong"));
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Current password is wrong"));
             }
             return updatePassword(username, newPassword);
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -404,32 +511,53 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/password")
     @RolesAllowed("admin")
     @Operation(
-            tags = "users",
-            summary = "Resets a Mobi User's password if User making request is the admin",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
+            summary = "Resets a User's password as an admin",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User's password successfully reset"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response resetPassword(
-            @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
             @Parameter(description = "Current username of the User to update", required = true)
             @PathParam("username") String username,
             @Parameter(description = "New password for the User", required = true)
             @QueryParam("newPassword") String newPassword) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(CURRENT_USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(CURRENT_USERNAME_PROVIDED));
         }
         if (StringUtils.isEmpty(newPassword)) {
-            throw ErrorUtils.sendError("New password must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("New password must be provided"));
         }
         try {
             return updatePassword(username, newPassword);
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -442,33 +570,59 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}")
     @RolesAllowed("user")
-    @Operation(
-            tags = "users",
-            summary = "Remove a Mobi user's account",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Operation(summary = "Removes a User account")
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User account successfully deleted",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "405",
+                    description = "The admin user cannot be deleted",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     public Response deleteUser(
-            @Context HttpServletRequest servletRequest,
+            @Parameter(hidden = true) @Context HttpServletRequest servletRequest,
             @Parameter(description = "Username of the User to remove", required = true)
             @PathParam("username") String username) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(USERNAME_PROVIDED));
         }
         isAuthorizedUser(servletRequest, username);
         try (RepositoryConnection conn = configProvider.getRepository().getConnection()) {
             Optional<User> user = engineManager.retrieveUser(username);
             if (user.isEmpty()) {
-                throw ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND));
             }
             String userIRI = user.get().getResource().stringValue();
             if (userIRI.equals(ADMIN_USER_IRI)) {
-                throw ErrorUtils.sendError("The admin user cannot be deleted.",
-                        Response.Status.METHOD_NOT_ALLOWED);
+                throw RestUtils.getErrorObjMethodNotAllowed(new UnsupportedOperationException("The admin user cannot be deleted."));
             }
             List<InProgressCommit> inProgressCommits = commitManager.getInProgressCommits(user.get(), conn);
             inProgressCommits.forEach(inProgressCommit ->
@@ -479,7 +633,7 @@ public class UserRest {
             logger.info("Deleted user " + username);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -493,28 +647,44 @@ public class UserRest {
      * @return a Response with a JSON array of the roles of the User in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/roles")
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "users",
-            summary = "List roles of a Mobi User",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Operation(summary = "Retrieves the roles of a User")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "JSON-LD array with the roles of the User",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response getUserRoles(
             @Parameter(description = "Username of the User to retrieve roles from", required = true)
             @PathParam("username") String username,
             @Parameter(description = "Whether or not to include roles from the User's groups")
             @DefaultValue("false") @QueryParam("includeGroups") boolean includeGroups) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(USERNAME_PROVIDED));
         }
         try {
             User user = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             Set<Role> roles = includeGroups ? engineManager.getUserRoles(username)
                     : user.getHasUserRole();
             ArrayNode result = roles.stream()
@@ -524,7 +694,7 @@ public class UserRest {
                     .collect(mapper::createArrayNode, ArrayNode::add, ArrayNode::add);
             return Response.ok(result).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -536,16 +706,38 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/roles")
     @RolesAllowed("admin")
     @Operation(
-            tags = "users",
-            summary = "Add roles to a Mobi User",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
+            summary = "Adds roles to a User",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Role successfully added to the User",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response addUserRoles(
             @Parameter(description = "Username of the User to add a role to", required = true)
             @PathParam("username") String username,
@@ -554,21 +746,21 @@ public class UserRest {
                     schema = @Schema(implementation = String.class, description = "role name")))
             @QueryParam("roles") List<String> roles) {
         if (StringUtils.isEmpty(username) || roles.isEmpty()) {
-            throw ErrorUtils.sendError("Both username and roles must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both username and roles must be provided"));
         }
 
         try {
             User savedUser = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             roles.stream()
                     .map(s -> engineManager.getRole(s).orElseThrow(() ->
-                            ErrorUtils.sendError(ROLE + s + NOT_FOUND, Response.Status.BAD_REQUEST)))
+                            RestUtils.getErrorObjBadRequest(new IllegalArgumentException(ROLE + s + NOT_FOUND))))
                     .forEach(savedUser::addHasUserRole);
             engineManager.updateUser(savedUser);
             logger.info("Role(s) " + String.join(", ", roles) + " added to user " + username);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -580,40 +772,61 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/roles")
     @RolesAllowed("admin")
     @Operation(
-            tags = "users",
-            summary = "Remove role from a Mobi User",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
+            summary = "Removes a role from a User",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Role successfully removed from the User",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response removeUserRole(
             @Parameter(description = "Username of the User to remove a role from", required = true)
             @PathParam("username") String username,
             @Parameter(description = "Role to remove from the specified User", required = true)
             @QueryParam("role") String role) {
         if (StringUtils.isEmpty(username) || role == null) {
-            throw ErrorUtils.sendError("Both username and role must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both username and role must be provided"));
         }
         try {
             User savedUser = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             Role roleObj = engineManager.getRole(role).orElseThrow(() ->
-                    ErrorUtils.sendError(ROLE + role + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException(ROLE + role + NOT_FOUND)));
             if (ADMIN_USER_IRI.equals(savedUser.getResource().stringValue())
                     && roleObj.getResource().stringValue().contains("admin")) {
-                throw ErrorUtils.sendError("Cannot remove admin role from admin user",
-                        Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Cannot remove admin role from admin user"));
             }
             savedUser.removeHasUserRole(roleObj);
             engineManager.updateUser(savedUser);
             logger.info(ROLE + role + " removed from user " + username);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -624,27 +837,43 @@ public class UserRest {
      * @return a Response with a JSON array of the groups the User is a part of in Mobi
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/groups")
     @RolesAllowed("user")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(
-            tags = "users",
-            summary = "List groups of a Mobi User",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
-    )
+    @Operation(summary = "Retrieves the groups of a User")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "JSON-LD array with the groups of the User",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response listUserGroups(
             @Parameter(description = "Username to retrieve groups from", required = true)
             @PathParam("username") String username) {
         if (StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError(USERNAME_PROVIDED, Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException(USERNAME_PROVIDED));
         }
 
         try {
             User savedUser = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             Set<Group> groups = engineManager.getGroups().stream()
                     .filter(group -> group.getMember_resource().stream()
                             .anyMatch(resource -> resource.equals(savedUser.getResource())))
@@ -657,7 +886,7 @@ public class UserRest {
                     .collect(mapper::createArrayNode, ArrayNode::add, ArrayNode::add);
             return Response.ok(result).build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -670,35 +899,57 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/groups")
     @RolesAllowed("admin")
     @Operation(
-            tags = "users",
-            summary = "Add a Mobi user to a group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
+            summary = "Adds a User to a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User successfully added to the Group",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response addUserGroup(
             @Parameter(description = "Username of the User to add to the group", required = true)
             @PathParam("username") String username,
             @Parameter(description = "Title of the group to add the specified User to", required = true)
             @QueryParam("group") String groupTitle) {
         if (StringUtils.isEmpty(username) || StringUtils.isEmpty(groupTitle)) {
-            throw ErrorUtils.sendError("Both username and group name must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both username and group name must be provided"));
         }
         try {
             User savedUser = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             Group savedGroup = engineManager.retrieveGroup(groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError("Group " + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Group " + groupTitle + NOT_FOUND)));
             savedGroup.addMember(savedUser);
             engineManager.updateGroup(savedGroup);
             logger.info("Added user " + username + " to group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -711,35 +962,57 @@ public class UserRest {
      * @return a Response indicating the success or failure of the request
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{username}/groups")
     @RolesAllowed("admin")
     @Operation(
-            tags = "users",
-            summary = "Remove a Mobi User from a group",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-            }
+            summary = "Removes a User from a Group",
+            description = "Requires the 'admin' role."
     )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "User successfully removed from the Group",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided User data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "User with the provided username does not exist",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     public Response removeUserGroup(
             @Parameter(description = "Username of the User to remove from a group", required = true)
             @PathParam("username") String username,
             @Parameter(description = "Title of the group to remove the specified User from", required = true)
             @QueryParam("group") String groupTitle) {
         if (StringUtils.isEmpty(username) || StringUtils.isEmpty(username)) {
-            throw ErrorUtils.sendError("Both username and group name must be provided", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Both username and group name must be provided"));
         }
         try {
             User savedUser = engineManager.retrieveUser(username).orElseThrow(() ->
-                    ErrorUtils.sendError("User " + username + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
             Group savedGroup = engineManager.retrieveGroup(rdfEngine.getEngineName(), groupTitle).orElseThrow(() ->
-                    ErrorUtils.sendError("Group " + groupTitle + NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Group " + groupTitle + NOT_FOUND)));
             savedGroup.removeMember(savedUser);
             engineManager.updateGroup(rdfEngine.getEngineName(), savedGroup);
             logger.info("Removed user " + username + " from group " + groupTitle);
             return Response.ok().build();
         } catch (IllegalArgumentException ex) {
-            throw ErrorUtils.sendError(ex.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(ex);
         }
     }
 
@@ -754,10 +1027,10 @@ public class UserRest {
     private void isAuthorizedUser(HttpServletRequest servletRequest, String username) {
         String activeUsername = getActiveUsername(servletRequest);
         if (!engineManager.userExists(activeUsername)) {
-            throw ErrorUtils.sendError("User not found", Response.Status.UNAUTHORIZED);
+            throw RestUtils.getErrorObjUnauthorized(new IllegalAccessException("User not found"));
         }
         if (!RestUtils.isAdminUser(activeUsername, engineManager) && !activeUsername.equals(username)) {
-            throw ErrorUtils.sendError("Not authorized to make this request", Response.Status.UNAUTHORIZED);
+            throw RestUtils.getErrorObjUnauthorized(new IllegalAccessException("Not authorized to make this request"));
         }
     }
 
@@ -770,7 +1043,7 @@ public class UserRest {
      */
     private void checkCurrentUser(String username, String currentUsername) {
         if (!username.equals(currentUsername)) {
-            throw ErrorUtils.sendError("Not authorized to make this request", Response.Status.UNAUTHORIZED);
+            throw RestUtils.getErrorObjUnauthorized(new IllegalAccessException("Not authorized to make this request"));
         }
     }
 
@@ -784,7 +1057,7 @@ public class UserRest {
      */
     private Response updatePassword(String username, String newPassword) {
         User savedUser = engineManager.retrieveUser(rdfEngine.getEngineName(), username).orElseThrow(() ->
-                        RestUtils.getErrorObjBadRequest(new MobiException("User " + username + NOT_FOUND)));
+                        RestUtils.getErrorObjNotFound(new MobiNotFoundException("User " + username + NOT_FOUND)));
         if (savedUser.getPassword().isEmpty()) {
             throw RestUtils.getErrorObjInternalServerError(new MobiException(MUST_HAVE_PASSWORD));
         }

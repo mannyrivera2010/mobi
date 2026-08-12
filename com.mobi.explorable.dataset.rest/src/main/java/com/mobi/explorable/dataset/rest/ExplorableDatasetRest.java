@@ -43,7 +43,6 @@ import com.mobi.explorable.dataset.rest.jaxb.ClassDetails;
 import com.mobi.explorable.dataset.rest.jaxb.InstanceDetails;
 import com.mobi.explorable.dataset.rest.jaxb.PropertyDetails;
 import com.mobi.explorable.dataset.rest.jaxb.RestrictionDetails;
-import com.mobi.ontologies.dcterms._Thing;
 import com.mobi.ontology.core.api.Ontology;
 import com.mobi.ontology.core.api.OntologyManager;
 import com.mobi.ontology.core.api.ontologies.ontologyeditor.OntologyRecord;
@@ -55,12 +54,20 @@ import com.mobi.rdf.orm.Thing;
 import com.mobi.rest.security.annotations.ActionId;
 import com.mobi.rest.security.annotations.ResourceId;
 import com.mobi.rest.security.annotations.ValueType;
-import com.mobi.rest.util.ErrorUtils;
 import com.mobi.rest.util.LinksUtils;
+import com.mobi.rest.util.MobiNotFoundException;
+import com.mobi.rest.util.RestUtils;
 import com.mobi.rest.util.jaxb.Links;
+import com.mobi.rest.util.swagger.ErrorObjectSchema;
+import com.mobi.rest.util.swagger.JsonLdObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.apache.commons.io.IOUtils;
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
@@ -72,6 +79,7 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.DynamicModelFactory;
 import org.eclipse.rdf4j.model.impl.ValidatingValueFactory;
+import org.eclipse.rdf4j.model.vocabulary.DCTERMS;
 import org.eclipse.rdf4j.model.vocabulary.OWL;
 import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.model.vocabulary.RDFS;
@@ -122,11 +130,12 @@ import javax.ws.rs.core.UriInfo;
 @JaxrsResource
 @Path("/explorable-datasets")
 public class ExplorableDatasetRest {
-
     private final Logger log = LoggerFactory.getLogger(ExplorableDatasetRest.class);
-
     private final ValueFactory factory = new ValidatingValueFactory();
     private final ModelFactory modelFactory = new DynamicModelFactory();
+
+    private static final String TAG_NAME = "ExplorableDataset";
+    private static final String TAG_DESC = "Operations for exploring and managing class instances within datasets";
 
     @Reference
     protected DatasetManager datasetManager;
@@ -168,7 +177,6 @@ public class ExplorableDatasetRest {
     private static final String PREDICATE_BINDING = "predicate";
     private static final String OBJECT_BINDING = "object";
     private static final String CLASS_IRI_REPLACE = "%CLASSIRI%";
-
     private static final String DATASET_IRI_REQUIRED = "The Dataset Record IRI is required.";
     private static final String RECORD_NOT_FOUND = "The Dataset Record could not be found.";
     private static final String INSTANCE_IRI_REQUIRED = "The Instance IRI is required.";
@@ -217,19 +225,32 @@ public class ExplorableDatasetRest {
      * @return A {@link Response} with a JSON array of ontology objects.
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/class-details")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Retrieves all the data associated with ontology objects, from a Dataset in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves class details for a Dataset")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON list of class details for the Dataset"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Dataset data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving class details",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response getClassDetails(
             @Parameter(description = "ID of the DatasetRecord for the Dataset from which to retrieve the data",
@@ -239,7 +260,7 @@ public class ExplorableDatasetRest {
         Resource datasetRecordRsr = factory.createIRI(recordIRI);
         try (RepositoryConnection conn = configProvider.getRepository().getConnection()) {
             DatasetRecord record = datasetManager.getDatasetRecord(datasetRecordRsr).orElseThrow(() ->
-                    ErrorUtils.sendError(RECORD_NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjNotFound(new MobiNotFoundException(RECORD_NOT_FOUND)));
             List<ClassDetails> classes = new ArrayList<>();
             Consumer<TupleQueryResult> tupleQueryResultConsumer = results ->
                     getClassDetailsFromQueryResults(results, datasetRecordRsr, classes);
@@ -247,8 +268,10 @@ public class ExplorableDatasetRest {
             List<ClassDetails> finalClasses = addOntologyDetailsToClasses(classes, record.getOntology(),
                     record.getModel(), conn);
             return Response.ok(finalClasses).build();
+        } catch (IllegalArgumentException ex) {
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -267,22 +290,30 @@ public class ExplorableDatasetRest {
      * @return A {@link Response} with a JSON object.
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/classes/{classIRI}/instance-details")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Retrieves an aggregated summary of all ontology objects from a Dataset in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "201",
-                            description = "Response indicating the success or failure of the request"),
-                    @ApiResponse(responseCode = "500",
-                            description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves a paginated list of instances of a specific class in a Dataset")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A paginated list of instance details for the specified class in the Dataset"
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving instance details",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response getInstanceDetails(
-            @Context UriInfo uriInfo,
+            @Parameter(hidden = true) @Context UriInfo uriInfo,
             @Parameter(description = "IRI of the DatasetRecord for the Dataset to summarize", required = true)
             @PathParam("recordIRI") String recordIRI,
             @Parameter(description = "IRI of the class type to get", required = true)
@@ -312,8 +343,10 @@ public class ExplorableDatasetRest {
             }
             Comparator<InstanceDetails> comparator = Comparator.comparing(InstanceDetails::getTitle);
             return createPagedResponse(uriInfo, instances, comparator, asc, limit, offset);
+        } catch (IllegalArgumentException ex) {
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -326,18 +359,33 @@ public class ExplorableDatasetRest {
      * @return A {@link Response} with a JSON array.
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/classes/{classIRI}/property-details")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Retrieves a list of all properties available for a class from a Dataset in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "201", description = "Response with a JSON array"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves all properties available for a class in a Dataset")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "A JSON list of property details for the specified class",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Dataset data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving class properties",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response getClassPropertyDetails(
             @Parameter(description = "Id of the DatasetRecord for the Dataset to summarize", required = true)
@@ -349,10 +397,12 @@ public class ExplorableDatasetRest {
         Resource recordId = factory.createIRI(recordIRI);
         try {
             DatasetRecord record = datasetManager.getDatasetRecord(recordId).orElseThrow(() ->
-                    ErrorUtils.sendError(RECORD_NOT_FOUND, Response.Status.BAD_REQUEST));
+                    RestUtils.getErrorObjBadRequest(new IllegalArgumentException(RECORD_NOT_FOUND)));
             return Response.ok(getClassProperties(record, classIRI)).build();
+        } catch (IllegalArgumentException ex) {
+            throw RestUtils.getErrorObjBadRequest(ex);
         } catch (MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -364,20 +414,42 @@ public class ExplorableDatasetRest {
      * @return A {@link Response} with the IRI string of the created Instance.
      */
     @POST
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/instances")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.TEXT_PLAIN)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Creates an instance of a particular class type in a Dataset in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "201",
-                            description = "Response with the IRI string of the created Instance"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Creates an instance of a class type in a Dataset")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "The IRI string of the created Instance"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Dataset data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while creating the instance",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(value = Modify.TYPE)
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response createInstance(
@@ -392,20 +464,18 @@ public class ExplorableDatasetRest {
             Resource instanceId = instanceModel.stream()
                     .filter(statement -> !(statement.getSubject() instanceof BNode))
                     .findAny().orElseThrow(() ->
-                            ErrorUtils.sendError("The new instance's IRI could not be "
-                                            + "found on any statement in the JSON-LD.",
-                                    Response.Status.INTERNAL_SERVER_ERROR)).getSubject();
+                            RestUtils.getErrorObjInternalServerError(new MobiException("The new instance's IRI could not be found on any statement in the"
+                                            + " JSON-LD."))).getSubject();
             if (conn.contains(instanceId, null, null)) {
-                throw ErrorUtils.sendError("The new instance's IRI is already taken.",
-                        Response.Status.INTERNAL_SERVER_ERROR);
+                throw RestUtils.getErrorObjInternalServerError(new MobiException("The new instance's IRI is already taken."));
             }
             conn.add(instanceModel);
             conn.close();
             return Response.status(201).entity(instanceId.stringValue()).build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -417,19 +487,33 @@ public class ExplorableDatasetRest {
      * @return A {@link Response} with a JSON-LD serialization of the desired instance.
      */
     @GET
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/instances/{instanceIRI}")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Retrieves an instance of a particular class type from a Dataset in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response with a JSON-LD serialization of the desired instance"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Retrieves a class instance from a Dataset by IRI")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "JSON-LD array with the JSON-LD serialization of the desired instance",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = JsonLdObject.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Dataset data or parameters are invalid",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while retrieving the instance",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            )
+    })
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response getInstance(
             @Parameter(description = "IRI of the DatasetRecord for the Dataset to summarize", required = true)
@@ -441,14 +525,14 @@ public class ExplorableDatasetRest {
         try (DatasetConnection conn = datasetManager.getConnection(factory.createIRI(recordIRI))) {
             Model instanceModel = getLimitedInstance(instanceIRI, conn);
             if (instanceModel.size() == 0) {
-                throw ErrorUtils.sendError(INSTANCE_NOT_FOUND, Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjNotFound(new MobiNotFoundException(INSTANCE_NOT_FOUND));
             }
             String json = modelToSkolemizedJsonld(instanceModel, bNodeService);
             return Response.ok(getArrayNodeFromJson(json)).build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -461,20 +545,39 @@ public class ExplorableDatasetRest {
      * @return A {@link Response} indicating whether the Instance was updated.
      */
     @PUT
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/instances/{instanceIRI}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Updates an instance of a particular class type from a Dataset in the local Catalog",
-            responses = {
-                    @ApiResponse(responseCode = "200", description = "Response indicating whether or not the "
-                            + "Instance was updated"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Updates a class instance in a Dataset")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Instance successfully updated",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Dataset data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while updating the instance",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(value = Modify.TYPE)
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response updateInstance(
@@ -490,7 +593,7 @@ public class ExplorableDatasetRest {
             Resource instanceId = factory.createIRI(instanceIRI);
             RepositoryResult<Statement> statements = conn.getStatements(instanceId, null, null);
             if (!statements.hasNext()) {
-                throw ErrorUtils.sendError(INSTANCE_NOT_FOUND, Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjNotFound(new MobiNotFoundException(INSTANCE_NOT_FOUND));
             }
             conn.begin();
             RepositoryResult<Statement> reifiedDeclarations = conn.getStatements(null, RDF.SUBJECT, instanceId);
@@ -506,9 +609,9 @@ public class ExplorableDatasetRest {
             conn.commit();
             return Response.ok().build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException | MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -520,19 +623,38 @@ public class ExplorableDatasetRest {
      * @return A Response indicating whether or not the Record was deleted.
      */
     @DELETE
+    @Tag(name = TAG_NAME, description = TAG_DESC)
     @Path("{recordIRI}/instances/{instanceIRI}")
-    @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("user")
-    @Operation(
-            tags = "explorable-datasets",
-            summary = "Deletes an instance by its ID",
-            responses = {
-                    @ApiResponse(responseCode = "200",
-                            description = "Response indicating whether or not the Record was deleted"),
-                    @ApiResponse(responseCode = "400", description = "BAD REQUEST"),
-                    @ApiResponse(responseCode = "500", description = "INTERNAL SERVER ERROR"),
-            }
-    )
+    @Operation(summary = "Deletes a class instance from a Dataset specified by the provided ID")  
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Instance successfully deleted",
+                    content = @Content(schema = @Schema(implementation = Void.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Provided Dataset data or parameters are invalid",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "User is not authenticated or session has expired",
+                    content = @Content(schema = @Schema(implementation = ErrorObjectSchema.class))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "An error occurred while deleting the instance",
+                    content = @Content(
+                            mediaType = MediaType.APPLICATION_JSON,
+                            schema = @Schema(implementation = ErrorObjectSchema.class)
+                    )
+            )
+    })
     @ActionId(value = Modify.TYPE)
     @ResourceId(type = ValueType.PATH, value = "recordIRI")
     public Response deleteInstance(
@@ -545,8 +667,7 @@ public class ExplorableDatasetRest {
         try (DatasetConnection conn = datasetManager.getConnection(factory.createIRI(recordIRI))) {
             Model instanceModel = getInstanceModel(instanceIRI, conn);
             if (instanceModel.size() == 0) {
-                throw ErrorUtils.sendError(INSTANCE_NOT_FOUND,
-                        Response.Status.BAD_REQUEST);
+                throw RestUtils.getErrorObjNotFound(new MobiNotFoundException(INSTANCE_NOT_FOUND));
             }
             conn.begin();
             conn.remove(instanceModel);
@@ -554,9 +675,9 @@ public class ExplorableDatasetRest {
             conn.commit();
             return Response.ok().build();
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException | MobiException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 
@@ -570,7 +691,7 @@ public class ExplorableDatasetRest {
      */
     private String getInferredClasses(Resource recordId, IRI classIRI) {
         DatasetRecord record = datasetManager.getDatasetRecord(recordId).orElseThrow(() ->
-                ErrorUtils.sendError(RECORD_NOT_FOUND, Response.Status.BAD_REQUEST));
+                RestUtils.getErrorObjBadRequest(new IllegalArgumentException(RECORD_NOT_FOUND)));
         Model recordModel = record.getModel();
         StringBuilder builder = new StringBuilder();
         builder.append(" <").append(classIRI.stringValue()).append("> ");
@@ -679,7 +800,7 @@ public class ExplorableDatasetRest {
     private void validatePaginationParams(int limit, int offset, int total) {
         LinksUtils.validateParams(limit, offset);
         if (offset > total) {
-            throw ErrorUtils.sendError("Offset exceeds total size", Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(new IllegalArgumentException("Offset exceeds total size"));
         }
     }
 
@@ -706,7 +827,7 @@ public class ExplorableDatasetRest {
      * @return entity label
      */
     private String findLabelToDisplay(Model model, IRI iri) {
-        return findPropertyToDisplay(model, iri, RDFS.LABEL.stringValue(), _Thing.title_IRI);
+        return findPropertyToDisplay(model, iri, RDFS.LABEL, DCTERMS.TITLE);
     }
 
     /**
@@ -718,7 +839,7 @@ public class ExplorableDatasetRest {
      * @return entity label
      */
     private String findDescriptionToDisplay(Model model, IRI iri) {
-        return findPropertyToDisplay(model, iri, RDFS.COMMENT.stringValue(), _Thing.description_IRI);
+        return findPropertyToDisplay(model, iri, RDFS.COMMENT, DCTERMS.DESCRIPTION);
     }
 
     /**
@@ -730,13 +851,13 @@ public class ExplorableDatasetRest {
      * @param dcProp   DCTERMS defined property to get the value of
      * @return entity value
      */
-    private String findPropertyToDisplay(Model model, IRI iri, String rdfsProp, String dcProp) {
+    private String findPropertyToDisplay(Model model, IRI iri, IRI rdfsProp, IRI dcProp) {
         if (model.size() > 0) {
-            Optional<Statement> rdfs = model.filter(null, factory.createIRI(rdfsProp), null).stream().findFirst();
+            Optional<Statement> rdfs = model.filter(null, rdfsProp, null).stream().findFirst();
             if (rdfs.isPresent()) {
                 return rdfs.get().getObject().stringValue();
             } else {
-                Optional<Statement> dcterm = model.filter(null, factory.createIRI(dcProp), null).stream().findFirst();
+                Optional<Statement> dcterm = model.filter(null, dcProp, null).stream().findFirst();
                 return dcterm.map(statement -> statement.getObject().stringValue()).orElseGet(() -> splitCamelCase(iri
                         .getLocalName()));
             }
@@ -762,9 +883,9 @@ public class ExplorableDatasetRest {
             }
             tupleQueryResultConsumer.accept(tq.evaluate());
         } catch (IllegalArgumentException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.BAD_REQUEST);
+            throw RestUtils.getErrorObjBadRequest(e);
         } catch (IllegalStateException e) {
-            throw ErrorUtils.sendError(e, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw RestUtils.getErrorObjInternalServerError(e);
         }
     }
 

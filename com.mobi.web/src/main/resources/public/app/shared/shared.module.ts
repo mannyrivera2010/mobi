@@ -83,6 +83,7 @@ import { DatasetSelectComponent } from './components/datasetSelect/datasetSelect
 import { DownloadQueryOverlayComponent } from './components/downloadQueryOverlay/downloadQueryOverlay.component';
 import { EditIriOverlayComponent } from './components/editIriOverlay/editIriOverlay.component';
 import { ErrorDisplayComponent } from './components/errorDisplay/errorDisplay.component';
+import { RestErrorDisplayComponent } from './components/restErrorDisplay/restErrorDisplay.component';
 import { FileInputComponent } from './components/fileInput/fileInput.component';
 import { FiltersSelectedListComponent } from './components/filters-selected-list/filters-selected-list.component';
 import { ImportsBlockComponent } from './components/importsBlock/importsBlock.component';
@@ -109,6 +110,7 @@ import { SettingGroupComponent } from './components/settingGroup/settingGroup.co
 import { SidebarComponent } from './components/sidebar/sidebar.component';
 import { SpinnerComponent } from './components/progress-spinner/components/spinner/spinner.component';
 import { StaticIriComponent } from '../shared/components/staticIri/staticIri.component';
+import { TriggerMentionInputComponent } from './components/triggerMentionInput/triggerMentionInput.component';
 import { UnmaskPasswordComponent } from './components/unmaskPassword/unmaskPassword.component';
 import { UserAccessControlsComponent } from './components/userAccessControls/userAccessControls.component';
 import { ValueDisplayComponent } from './components/valueDisplay/valueDisplay.component';
@@ -233,6 +235,7 @@ import { MobiErrorStateMatcher } from './MobiErrorStateMatcher';
     DragFileDirective,
     EditIriOverlayComponent,
     ErrorDisplayComponent,
+    RestErrorDisplayComponent,
     FileInputComponent,
     FiltersSelectedListComponent,
     FocusDirective,
@@ -264,6 +267,7 @@ import { MobiErrorStateMatcher } from './MobiErrorStateMatcher';
     SpinnerComponent,
     SplitIRIPipe,
     StaticIriComponent,
+    TriggerMentionInputComponent,
     TrustedHtmlPipe,
     UnmaskPasswordComponent,
     UserAccessControlsComponent,
@@ -328,6 +332,7 @@ import { MobiErrorStateMatcher } from './MobiErrorStateMatcher';
     DatasetSelectComponent,
     DragFileDirective,
     ErrorDisplayComponent,
+    RestErrorDisplayComponent,
     FileInputComponent,
     FiltersSelectedListComponent,
     FocusDirective,
@@ -358,6 +363,7 @@ import { MobiErrorStateMatcher } from './MobiErrorStateMatcher';
     SpinnerComponent,
     SplitIRIPipe,
     StaticIriComponent,
+    TriggerMentionInputComponent,
     TrustedHtmlPipe,
     UnmaskPasswordComponent,
     UserAccessControlsComponent,

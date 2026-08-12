@@ -23,7 +23,8 @@ package com.mobi.catalog.rest;
  * #L%
  */
 
-import static com.mobi.ontologies.rdfs.Resource.type_IRI;
+import static com.mobi.rest.test.util.ErrorResponseAssert.assertErrorResponse;
+import static com.mobi.rest.test.util.ErrorResponseAssert.assertErrorType;
 import static com.mobi.persistence.utils.ResourceUtils.encode;
 import static com.mobi.rdf.orm.test.OrmEnabledTestCase.getModelFactory;
 import static com.mobi.rdf.orm.test.OrmEnabledTestCase.getValueFactory;
@@ -74,7 +75,6 @@ import com.mobi.exception.MobiException;
 import com.mobi.jaas.api.engines.EngineManager;
 import com.mobi.jaas.api.ontologies.usermanagement.User;
 import com.mobi.jaas.api.ontologies.usermanagement.UserFactory;
-import com.mobi.ontologies.dcterms._Thing;
 import com.mobi.rdf.orm.conversion.ValueConverterRegistry;
 import com.mobi.rdf.orm.conversion.impl.DefaultValueConverterRegistry;
 import com.mobi.rdf.orm.conversion.impl.DoubleValueConverter;
@@ -98,6 +98,8 @@ import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.ModelFactory;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.vocabulary.DCTERMS;
+import org.eclipse.rdf4j.model.vocabulary.RDF;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.repository.sail.SailRepository;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
@@ -247,10 +249,10 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
 
         comment1 = commentFactory.createNew(vf.createIRI("http://mobi.com/test/comments#1"));
         comment1.setOnMergeRequest(request1);
-        comment1.setProperty(vf.createLiteral("2018-11-05T13:40:55.257-07:00"), vf.createIRI(_Thing.issued_IRI));
-        comment1.setProperty(vf.createLiteral("2018-11-05T13:40:55.257-07:00"), vf.createIRI(_Thing.modified_IRI));
-        comment1.setProperty(user.getResource(), vf.createIRI(_Thing.creator_IRI));
-        comment1.setProperty(vf.createLiteral("Comment1"), vf.createIRI(_Thing.description_IRI));
+        comment1.setProperty(vf.createLiteral("2018-11-05T13:40:55.257-07:00"), DCTERMS.ISSUED);
+        comment1.setProperty(vf.createLiteral("2018-11-05T13:40:55.257-07:00"), DCTERMS.MODIFIED);
+        comment1.setProperty(user.getResource(), DCTERMS.CREATOR);
+        comment1.setProperty(vf.createLiteral("Comment1"), DCTERMS.DESCRIPTION);
         comment2 = commentFactory.createNew(vf.createIRI("http://mobi.com/test/comments#2"));
         comment2.setOnMergeRequest(request1);
         comment3 = commentFactory.createNew(vf.createIRI("http://mobi.com/test/comments#3"));
@@ -326,8 +328,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         doThrow(new IllegalStateException()).when(requestManager).getMergeRequests(any(MergeRequestFilterParams.class));
 
         Response response = target().path("merge-requests").request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getMergeRequests(any(MergeRequestFilterParams.class));
+
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -336,8 +339,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         doThrow(new MobiException()).when(requestManager).getMergeRequests(any(MergeRequestFilterParams.class));
 
         Response response = target().path("merge-requests").request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getMergeRequests(any(MergeRequestFilterParams.class));
+
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -470,9 +474,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void getCreatorsWithBadPagingTest() {
         Response response = target().path("merge-requests/creators").queryParam("offset", -1).queryParam("limit", -1).request().get();
-        assertEquals(400, response.getStatus());
         verify(requestManager, times(0)).getCreators(any(PaginatedSearchParams.class), any(Resource.class));
-        assertEquals("", response.readEntity(String.class));
+
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Offset cannot be negative.");
     }
 
     @Test
@@ -506,17 +510,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doThrow(new IllegalArgumentException("I'm an exception!")).when(requestManager).getCreators(any(PaginatedSearchParams.class), any(Resource.class));
 
         Response response = target().path("merge-requests/creators").request().get();
-        assertEquals(400, response.getStatus());
         verify(requestManager).getCreators(any(PaginatedSearchParams.class), any(Resource.class));
-
-        try {
-            ObjectNode responseObject = mapper.readValue(response.readEntity(String.class), ObjectNode.class);
-            assertEquals(responseObject.get("error").asText(), "IllegalArgumentException");
-            assertEquals(responseObject.get("errorMessage").asText(), "I'm an exception!");
-            assertNotEquals(responseObject.get("errorDetails"), null);
-        } catch (Exception e) {
-            fail("Expected no exception, but got: " + e.getMessage());
-        }
+        assertErrorResponse(response, 400, "IllegalArgumentException", "I'm an exception!");
     }
 
     @Test
@@ -524,17 +519,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doThrow(new IllegalStateException("I'm an exception!")).when(requestManager).getCreators(any(PaginatedSearchParams.class), any(Resource.class));
 
         Response response = target().path("merge-requests/creators").request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getCreators(any(PaginatedSearchParams.class), any(Resource.class));
-
-        try {
-            ObjectNode responseObject = mapper.readValue(response.readEntity(String.class), ObjectNode.class);
-            assertEquals(responseObject.get("error").asText(), "IllegalStateException");
-            assertEquals(responseObject.get("errorMessage").asText(), "I'm an exception!");
-            assertNotEquals(responseObject.get("errorDetails"), null);
-        } catch (Exception e) {
-            fail("Expected no exception, but got: " + e.getMessage());
-        }
+        assertErrorResponse(response, 500, "IllegalStateException", "I'm an exception!");
     }
 
     /* GET merge-requests/assignees */
@@ -593,9 +579,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void getAssigneesWithBadPagingTest() {
         Response response = target().path("merge-requests/assignees").queryParam("offset", -1).queryParam("limit", -1).request().get();
-        assertEquals(400, response.getStatus());
         verify(requestManager, times(0)).getAssignees(any(PaginatedSearchParams.class), any(Resource.class));
-        assertEquals("", response.readEntity(String.class));
+
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Offset cannot be negative.");
     }
 
     @Test
@@ -629,17 +615,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doThrow(new IllegalArgumentException("I'm an exception!")).when(requestManager).getAssignees(any(PaginatedSearchParams.class), any(Resource.class));
 
         Response response = target().path("merge-requests/assignees").request().get();
-        assertEquals(400, response.getStatus());
         verify(requestManager).getAssignees(any(PaginatedSearchParams.class), any(Resource.class));
-
-        try {
-            ObjectNode responseObject = mapper.readValue(response.readEntity(String.class), ObjectNode.class);
-            assertEquals(responseObject.get("error").asText(), "IllegalArgumentException");
-            assertEquals(responseObject.get("errorMessage").asText(), "I'm an exception!");
-            assertNotEquals(responseObject.get("errorDetails"), null);
-        } catch (Exception e) {
-            fail("Expected no exception, but got: " + e.getMessage());
-        }
+        assertErrorResponse(response, 400, "IllegalArgumentException", "I'm an exception!");
     }
 
     @Test
@@ -647,17 +624,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doThrow(new IllegalStateException("I'm an exception!")).when(requestManager).getAssignees(any(PaginatedSearchParams.class), any(Resource.class));
 
         Response response = target().path("merge-requests/assignees").request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getAssignees(any(PaginatedSearchParams.class), any(Resource.class));
-
-        try {
-            ObjectNode responseObject = mapper.readValue(response.readEntity(String.class), ObjectNode.class);
-            assertEquals(responseObject.get("error").asText(), "IllegalStateException");
-            assertEquals(responseObject.get("errorMessage").asText(), "I'm an exception!");
-            assertNotEquals(responseObject.get("errorDetails"), null);
-        } catch (Exception e) {
-            fail("Expected no exception, but got: " + e.getMessage());
-        }
+        assertErrorResponse(response, 500, "IllegalStateException", "I'm an exception!");
     }
 
     /* POST merge-requests */
@@ -695,8 +663,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         fd.field("removeSource", "true");
 
         Response response = target().path("merge-requests").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Cannot merge the same branch into itself.");
     }
 
     @Test
@@ -710,10 +678,10 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         fd.field("assignees", "error");
 
         Response response = target().path("merge-requests").request().post(Entity.entity(fd.body(), MediaType.MULTIPART_FORM_DATA));
-        assertEquals(400, response.getStatus());
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager, times(0)).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorResponse(response, 400, "IllegalArgumentException", "User error does not exist");
     }
 
     @Test
@@ -729,6 +697,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, times(0)).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager, times(0)).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Merge Request title is required");
     }
 
     @Test
@@ -744,6 +713,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, times(0)).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager, times(0)).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Merge Request record is required");
     }
 
     @Test
@@ -759,6 +729,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, times(0)).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager, times(0)).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Merge Request source branch is required");
     }
 
     @Test
@@ -774,6 +745,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, times(0)).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager, times(0)).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Merge Request target branch is required");
     }
 
     @Test
@@ -791,6 +763,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -834,6 +807,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -851,6 +825,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager).createMergeRequest(any(MergeRequestConfig.class), any(Resource.class));
         verify(requestManager, times(0)).addMergeRequest(any(MergeRequest.class));
+        assertErrorType(response, 500, "MobiException");
     }
 
     /* GET merge-requests/{requestId} */
@@ -873,8 +848,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void getMissingMergeRequestTest() {
         Response response = target().path("merge-requests/" + encode("http://mobi.com/error")).request().get();
-        assertEquals(404, response.getStatus());
         verify(requestManager).getMergeRequest(vf.createIRI("http://mobi.com/error"));
+
+        assertErrorResponse(response, 404, "MobiNotFoundException", "Merge Request http://mobi.com/error could not be found");
     }
 
     @Test
@@ -883,8 +859,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         doThrow(new IllegalStateException()).when(requestManager).getMergeRequest(request1.getResource());
 
         Response response = target().path("merge-requests/" + encode(request1.getResource().stringValue())).request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getMergeRequest(request1.getResource());
+
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -893,8 +870,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         doThrow(new MobiException()).when(requestManager).getMergeRequest(request1.getResource());
 
         Response response = target().path("merge-requests/" + encode(request1.getResource().stringValue())).request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getMergeRequest(request1.getResource());
+
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -922,7 +900,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request()
                 .put(Entity.json("[]"));
         verify(requestManager, never()).updateMergeRequest(eq(request1.getResource()), any(MergeRequest.class));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "MergeRequest IDs must match");
     }
 
     @Test
@@ -942,7 +920,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request()
                 .put(Entity.entity(groupedModelToString(request2.getModel(), getRDFFormat("jsonld")), MediaType.APPLICATION_JSON_TYPE));
         verify(requestManager, never()).updateMergeRequest(eq(request1.getResource()), any(MergeRequest.class));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "MergeRequest IDs must match");
     }
 
     @Test
@@ -953,7 +931,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request()
                 .put(Entity.entity(groupedModelToString(request1.getModel(), getRDFFormat("jsonld")), MediaType.APPLICATION_JSON_TYPE));
         verify(requestManager).updateMergeRequest(eq(request1.getResource()), any(MergeRequest.class));
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -979,7 +957,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     public void retrieveMergeRequestStatusClosedTest() {
         Mockito.doReturn(false).when(rest).checkMergeRequestManagePermissions(any(), any());
         try (RepositoryConnection conn = repo.getConnection()) {
-            conn.add(request1.getResource(), vf.createIRI(type_IRI), vf.createIRI(ClosedMergeRequest.TYPE));
+            conn.add(request1.getResource(), RDF.TYPE, vf.createIRI(ClosedMergeRequest.TYPE));
         }
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .request().get();
@@ -992,7 +970,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     public void retrieveMergeRequestStatusAcceptedTest() {
         Mockito.doReturn(false).when(rest).checkMergeRequestManagePermissions(any(), any());
         try (RepositoryConnection conn = repo.getConnection()) {
-            conn.add(request1.getResource(), vf.createIRI(type_IRI), vf.createIRI(AcceptedMergeRequest.TYPE));
+            conn.add(request1.getResource(), RDF.TYPE, vf.createIRI(AcceptedMergeRequest.TYPE));
         }
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .request().get();
@@ -1005,7 +983,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     public void retrieveMergeRequestStatusOpenTest() {
         Mockito.doReturn(false).when(rest).checkMergeRequestManagePermissions(any(), any());
         try (RepositoryConnection conn = repo.getConnection()) {
-            conn.add(request1.getResource(), vf.createIRI(type_IRI), vf.createIRI(MergeRequest.TYPE));
+            conn.add(request1.getResource(), RDF.TYPE, vf.createIRI(MergeRequest.TYPE));
         }
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .request().get();
@@ -1018,11 +996,11 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     public void retrieveMergeRequestStatusNoAssociatedState() {
         Mockito.doReturn(false).when(rest).checkMergeRequestManagePermissions(any(), any());
         try (RepositoryConnection conn = repo.getConnection()) {
-            conn.add(request1.getResource(), vf.createIRI(type_IRI), vf.createIRI("urn:invalid"));
+            conn.add(request1.getResource(), RDF.TYPE, vf.createIRI("urn:invalid"));
         }
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .request().get();
-        assertEquals(500, response.getStatus());
+        assertErrorResponse(response, 500, "IllegalStateException", "The Merge Request has no associated status.");
     }
 
     @Test
@@ -1030,7 +1008,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doReturn(false).when(rest).checkMergeRequestManagePermissions(any(), any());
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .request().get();
-        assertEquals(404, response.getStatus());
+        assertErrorResponse(response, 404, "MobiNotFoundException", "Merge Request " + request1.getResource().stringValue() + " could not be found");
     }
 
     /* POST merge-requests/{requestId}/status */
@@ -1054,7 +1032,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .queryParam("action", "accept")
                 .request().post(Entity.entity("", MediaType.TEXT_PLAIN));
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -1066,7 +1044,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .queryParam("action", "accept")
                 .request().post(Entity.entity("", MediaType.TEXT_PLAIN));
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -1095,7 +1073,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Response response = target().path(String.format("merge-requests/%s/status", encode(request1.getResource().stringValue())))
                 .queryParam("action", "invalid")
                 .request().post(Entity.entity("", MediaType.TEXT_PLAIN));
-        assertEquals(response.getStatus(), BAD_REQUEST.getStatusCode());
+        assertErrorResponse(response, BAD_REQUEST.getStatusCode(), "IllegalArgumentException", "Not a valid action to take.");
     }
 
     /* DELETE merge-requests/{requestId} */
@@ -1114,7 +1092,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doReturn(false).when(rest).checkMergeRequestManagePermissions(any(), any());
         Response response = target().path("merge-requests/" + encode(doesNotExist))
                 .request().delete();
-        assertEquals(404, response.getStatus());
+        assertErrorResponse(response, 404, "MobiNotFoundException", "Merge Request " + doesNotExist + " could not be found");
     }
 
     @Test
@@ -1155,8 +1133,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         doThrow(new MobiException()).when(requestManager).getComments(any(Resource.class));
 
         Response response = target().path("merge-requests/" + encode(request1.getResource().stringValue()) + "/comments").request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getComments(eq(request1.getResource()));
+
+        assertErrorType(response, 500, "MobiException");
     }
 
     /* POST merge-requests/{requestId}/comments */
@@ -1180,13 +1159,14 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         assertEquals(500, response.getStatus());
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager).createComment(eq(request1.getResource()), any(User.class), anyString());
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
     public void createCommentEmptyCommentTest() {
         Response response = target().path("merge-requests/" + encode(request1.getResource().stringValue()) + "/comments")
                 .request().post(Entity.text(""));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Comment string is required");
     }
 
     @Test
@@ -1210,6 +1190,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         assertEquals(500, response.getStatus());
         verify(engineManager, atLeastOnce()).retrieveUser(UsernameTestFilter.USERNAME);
         verify(requestManager).createComment(eq(request1.getResource()), any(User.class), anyString(), eq(comment1.getResource()));
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -1217,7 +1198,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Response response = target().path("merge-requests/" + encode(request1.getResource().stringValue()) + "/comments")
                 .queryParam("commentId", comment2.getResource().stringValue())
                 .request().post(Entity.text(""));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Comment string is required");
     }
 
     /* GET merge-requests/{requestId}/comments/{commentId} */
@@ -1244,14 +1225,15 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         assertEquals(404, response.getStatus());
         verify(requestManager).getMergeRequest(request1.getResource());
         verify(requestManager).getComment(vf.createIRI("http://mobi.com/error"));
+        assertErrorResponse(response, 404, "MobiNotFoundException", "Comment http://mobi.com/error could not be found");
     }
 
     @Test
     public void getCommentMissingRequestTest() {
         Response response = target().path("merge-requests/" + encode("http://mobi.com/error") + "/comments/"
                 + encode(comment1.getResource().stringValue())).request().get();
-        assertEquals(404, response.getStatus());
         verify(requestManager).getMergeRequest(vf.createIRI("http://mobi.com/error"));
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Merge Request http://mobi.com/error could not be found");
     }
 
     @Test
@@ -1264,6 +1246,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         assertEquals(500, response.getStatus());
         verify(requestManager).getMergeRequest(request1.getResource());
         verify(requestManager).getComment(comment1.getResource());
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -1284,8 +1267,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         ArgumentCaptor<Comment> commentArgumentCaptor = ArgumentCaptor.forClass(Comment.class);
         verify(requestManager).updateComment(eq(comment1.getResource()), commentArgumentCaptor.capture());
         Comment comment = commentArgumentCaptor.getValue();
-        assertNotEquals(comment.getProperty(vf.createIRI(_Thing.description_IRI)), Optional.empty());
-        assertEquals(comment.getProperty(vf.createIRI(_Thing.description_IRI)).get().stringValue(), updateCommentText);
+        assertNotEquals(comment.getProperty(DCTERMS.DESCRIPTION), Optional.empty());
+        assertEquals(comment.getProperty(DCTERMS.DESCRIPTION).get().stringValue(), updateCommentText);
         assertEquals(200, response.getStatus());
     }
 
@@ -1296,7 +1279,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request()
                 .put(Entity.text(""));
         verify(requestManager, never()).updateComment(eq(comment1.getResource()), any(Comment.class));
-        assertEquals(400, response.getStatus());
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Comment string is required");
     }
 
     @Test
@@ -1309,9 +1292,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         ArgumentCaptor<Comment> commentArgumentCaptor = ArgumentCaptor.forClass(Comment.class);
         verify(requestManager).updateComment(eq(comment1.getResource()), commentArgumentCaptor.capture());
         Comment comment = commentArgumentCaptor.getValue();
-        assertNotEquals(comment.getProperty(vf.createIRI(_Thing.description_IRI)), Optional.empty());
-        assertEquals(comment.getProperty(vf.createIRI(_Thing.description_IRI)).get().stringValue(), largeComment);
-        assertEquals(400, response.getStatus());
+        assertNotEquals(comment.getProperty(DCTERMS.DESCRIPTION), Optional.empty());
+        assertEquals(comment.getProperty(DCTERMS.DESCRIPTION).get().stringValue(), largeComment);
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -1324,9 +1307,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         ArgumentCaptor<Comment> commentArgumentCaptor = ArgumentCaptor.forClass(Comment.class);
         verify(requestManager).updateComment(eq(comment1.getResource()), commentArgumentCaptor.capture());
         Comment comment = commentArgumentCaptor.getValue();
-        assertNotEquals(comment.getProperty(vf.createIRI(_Thing.description_IRI)), Optional.empty());
-        assertEquals(comment.getProperty(vf.createIRI(_Thing.description_IRI)).get().stringValue(), updateCommentText);
-        assertEquals(500, response.getStatus());
+        assertNotEquals(comment.getProperty(DCTERMS.DESCRIPTION), Optional.empty());
+        assertEquals(comment.getProperty(DCTERMS.DESCRIPTION).get().stringValue(), updateCommentText);
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -1358,7 +1341,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request().delete();
         verify(requestManager).getMergeRequest(request1.getResource());
         verify(requestManager).deleteComment(comment1.getResource());
-        assertEquals(400, response.getStatus());
+        assertErrorType(response, 400, "IllegalArgumentException");
     }
 
     @Test
@@ -1369,7 +1352,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request().delete();
         verify(requestManager).getMergeRequest(request1.getResource());
         verify(requestManager).deleteComment(comment1.getResource());
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "IllegalStateException");
     }
 
     @Test
@@ -1380,7 +1363,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
                 .request().delete();
         verify(requestManager).getMergeRequest(request1.getResource());
         verify(requestManager).deleteComment(comment1.getResource());
-        assertEquals(500, response.getStatus());
+        assertErrorType(response, 500, "MobiException");
     }
 
     @Test
@@ -1388,8 +1371,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Response response = target().path("merge-requests/" + encode("http://mobi.com/error") + "/comments/"
                 + encode(comment1.getResource().stringValue()))
                 .request().delete();
-        assertEquals(404, response.getStatus());
         verify(requestManager).getMergeRequest(vf.createIRI("http://mobi.com/error"));
+
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Merge Request http://mobi.com/error could not be found");
     }
 
     @Test
@@ -1400,6 +1384,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         assertEquals(404, response.getStatus());
         verify(requestManager).getMergeRequest(request1.getResource());
         verify(requestManager).getComment(vf.createIRI("http://mobi.com/error"));
+        assertErrorResponse(response, 404, "MobiNotFoundException", "Comment http://mobi.com/error could not be found");
     }
 
     @Test
@@ -1469,9 +1454,9 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void getRecordsWithBadPagingTest() {
         Response response = target().path("merge-requests/records").queryParam("offset", -1).queryParam("limit", -1).request().get();
-        assertEquals(400, response.getStatus());
         verify(requestManager, times(0)).getRecords(any(PaginatedSearchParams.class), any(Resource.class));
-        assertEquals("", response.readEntity(String.class));
+
+        assertErrorResponse(response, 400, "IllegalArgumentException", "Offset cannot be negative.");
     }
 
     @Test
@@ -1505,17 +1490,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doThrow(new IllegalArgumentException("I'm an exception!")).when(requestManager).getRecords(any(PaginatedSearchParams.class), any(Resource.class));
 
         Response response = target().path("merge-requests/records").request().get();
-        assertEquals(400, response.getStatus());
         verify(requestManager).getRecords(any(PaginatedSearchParams.class), any(Resource.class));
-
-        try {
-            ObjectNode responseObject = mapper.readValue(response.readEntity(String.class), ObjectNode.class);
-            assertEquals(responseObject.get("error").asText(), "IllegalArgumentException");
-            assertEquals(responseObject.get("errorMessage").asText(), "I'm an exception!");
-            assertNotEquals(responseObject.get("errorDetails"), null);
-        } catch (Exception e) {
-            fail("Expected no exception, but got: " + e.getMessage());
-        }
+        assertErrorResponse(response, 400, "IllegalArgumentException", "I'm an exception!");
     }
 
     @Test
@@ -1523,17 +1499,8 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
         Mockito.doThrow(new IllegalStateException("I'm an exception!")).when(requestManager).getRecords(any(PaginatedSearchParams.class), any(Resource.class));
 
         Response response = target().path("merge-requests/records").request().get();
-        assertEquals(500, response.getStatus());
         verify(requestManager).getRecords(any(PaginatedSearchParams.class), any(Resource.class));
-
-        try {
-            ObjectNode responseObject = mapper.readValue(response.readEntity(String.class), ObjectNode.class);
-            assertEquals(responseObject.get("error").asText(), "IllegalStateException");
-            assertEquals(responseObject.get("errorMessage").asText(), "I'm an exception!");
-            assertNotEquals(responseObject.get("errorDetails"), null);
-        } catch (Exception e) {
-            fail("Expected no exception, but got: " + e.getMessage());
-        }
+        assertErrorResponse(response, 500, "IllegalStateException", "I'm an exception!");
     }
 
     @Test
@@ -1549,7 +1516,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void checkMergeRequestPermissionsCreatorTest() {
         MergeRequest mergeRequest = Mockito.mock(MergeRequest.class);
-        when(mergeRequest.getProperty(vf.createIRI(_Thing.creator_IRI))).thenReturn(Optional.of(vf.createIRI("urn:user1")));
+        when(mergeRequest.getProperty(DCTERMS.CREATOR)).thenReturn(Optional.of(vf.createIRI("urn:user1")));
 
         when(requestManager.getMergeRequest(any())).thenReturn(Optional.of(mergeRequest));
 
@@ -1563,7 +1530,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void checkMergeRequestPermissionsCreatorAccessDeniedTest() {
         MergeRequest mergeRequest = Mockito.mock(MergeRequest.class);
-        when(mergeRequest.getProperty(vf.createIRI(_Thing.creator_IRI))).thenReturn(Optional.of(vf.createIRI("urn:user1")));
+        when(mergeRequest.getProperty(DCTERMS.CREATOR)).thenReturn(Optional.of(vf.createIRI("urn:user1")));
 
         when(requestManager.getMergeRequest(any())).thenReturn(Optional.of(mergeRequest));
 
@@ -1577,7 +1544,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void checkMergeRequestPermissionsPepAccessDeniedFalseTest() {
         MergeRequest mergeRequest = Mockito.mock(MergeRequest.class);
-        when(mergeRequest.getProperty(vf.createIRI(_Thing.creator_IRI))).thenReturn(Optional.of(vf.createIRI("urn:user1")));
+        when(mergeRequest.getProperty(DCTERMS.CREATOR)).thenReturn(Optional.of(vf.createIRI("urn:user1")));
         when(mergeRequest.getOnRecord_resource()).thenReturn(Optional.of(vf.createIRI("urn:onRecord")));
 
         when(requestManager.getMergeRequest(any())).thenReturn(Optional.of(mergeRequest));
@@ -1600,7 +1567,7 @@ public class MergeRequestRestTest extends MobiRestTestCXF {
     @Test
     public void checkMergeRequestPermissionsPepAccessDeniedTrueTest() {
         MergeRequest mergeRequest = Mockito.mock(MergeRequest.class);
-        when(mergeRequest.getProperty(vf.createIRI(_Thing.creator_IRI))).thenReturn(Optional.of(vf.createIRI("urn:user1")));
+        when(mergeRequest.getProperty(DCTERMS.CREATOR)).thenReturn(Optional.of(vf.createIRI("urn:user1")));
         when(mergeRequest.getOnRecord_resource()).thenReturn(Optional.of(vf.createIRI("urn:onRecord")));
 
         when(requestManager.getMergeRequest(any())).thenReturn(Optional.of(mergeRequest));
