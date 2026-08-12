@@ -13,7 +13,9 @@ implementation track for
 [ADR-0002](../docs/adr/0002-out-of-process-prolly-rdf4j-over-a-network-boundary.md);
 it is an **alternative** to the embedded
 [prolly-tree storage backend evaluation](prolly-tree-storage-backend-evaluation.md),
-not pursued alongside it. Proposed, not started.
+not pursued alongside it. Active; Phase-0 Step 0 measured 2026-08-12 — the
+replay cost is real but lives on *historical* reads, not head reads (see the
+Step 0 wrap-up).
 
 ## Goal
 
@@ -49,7 +51,7 @@ that needs no RDF4J upgrade, no Java 21 in Mobi, and no OSGi packaging of prolly
 
 ## Phase 0 — Measure (turn the performance intuition into data)
 
-- [ ] **Step 0 — Confirm the problem exists, in Mobi alone (no prolly needed).**
+- [x] **Step 0 — Confirm the problem exists, in Mobi alone (no prolly needed).**
   Measure whether `getCompiledResource` cost grows with commit-chain depth. This is
   the gate behind *all three* ADRs: if the replay is not actually hurting at
   realistic depths, stop — neither prolly path is justified yet. Uses only Mobi's
@@ -100,6 +102,54 @@ that needs no RDF4J upgrade, no Java 21 in Mobi, and no OSGi packaging of prolly
   (or worse) with depth → the problem is real; proceed to Step 1 and to the
   Strategy-B snapshot-read evaluation.
 
+  (**Executed 2026-08-12.** Harness:
+  `com.mobi.catalog.impl/src/test/java/com/mobi/catalog/impl/versioning/CompiledResourceDepthBenchmark.java`
+  — builds a master chain through the real `addMasterCommit` path (2 added
+  triples per commit), then times `getCompiledResource` (min of 5 reps per
+  cell). Machine: Intel N150, 4 cores, JDK 17.0.19 (Temurin), RDF4J
+  `MemoryStore`, Linux. **The surprise: the decision rule's premise was
+  half-wrong — reads at master HEAD are already O(1)**, not O(history): 40 /
+  18 / 23 ms at chain lengths 10 / 100 / 1000, because the revision refactor
+  keeps a materialized HEAD graph and stores master deltas reversed. The
+  replay cost is real but lives on reads *behind* head, and it grows worse
+  than linearly with distance: at chain length 1000, distance 10 → 1 669 ms,
+  100 → 2 919 ms, 500 → 25 084 ms, 999 → 91 222 ms — ~80× to ~4 500× the head
+  read. **Verdict: proceed, with the scope corrected** — the prolly snapshot
+  win applies to time-travel flows (open-at-commit, diff inputs, merge-base
+  fetches), not to the common open-at-head flow, which is already fast.
+  Benchmark run: 1/1 pass (model-size assertions verify each compiled state).
+  Two harness corrections vs. the runbook as authored: the record needs
+  `mcat:branch` → master set or `getRevisionChain`'s `get-master-head.rq`
+  finds no binding, and the initial commit's state must be pre-placed in the
+  HEAD graph with empty deltas — a first-commit `InProgressCommit` delta is
+  silently ignored.)
+
+  (**Addendum, same day — the disk-backed store.** The same harness on an
+  RDF4J `NativeStore` (`-Dbench.store=native`, NVMe under ZFS, min of 3 reps)
+  confirms the shape on the store production runs and widens the gap: HEAD
+  reads stay flat (38 / 25 / 60 ms at chain 10 / 100 / 1000; 52 ms at
+  distance 0) while historical reads pay the disk penalty on top — distance
+  10 → 4 013 ms, 100 → 27 853 ms (~1.4× and ~9.5× the memory-store numbers);
+  the distance-500/999 cells had not finished at recording time — the
+  multi-minute runtime is itself the finding; append them when the run
+  completes. Chain build on disk: 46 s vs 7 s in memory.)
+
+  (**Addendum, same day — the prolly-rdf4j side, embedded structural bound.**
+  A mirror benchmark (same workload: 1000 commits × 2 added triples, same
+  machine) against prolly-rdf4j 0.2.0-BETA in-JVM — `ProllySail.openSnapshotAt`
+  + full `getStatements` drain + teardown per read, RocksDB `RocksNodeStore`
+  on disk, JDK 25, min of 5 reps — reads **flat ≈ 1 ms at every distance**
+  behind head (0 / 10 / 100 / 500 / 999), and the 1000-commit build took 4 s.
+  Against Mobi's in-memory replay that is ~1,700× at distance 10 and
+  ~90,000× at distance 999; content-addressing makes history position
+  irrelevant, as ADR-0002 predicted. **Caveat:** this is the *embedded* bound
+  — no network hop, no serialisation; the out-of-process cost this plan
+  exists to measure (Steps 1–3) sits on top of it, but even 10 ms of wire
+  overhead per read would not change the verdict for time-travel flows.
+  Harness: scratchpad-only (`ProllyDepthBenchmark.java`), not committed to
+  either repo; per prolly-port's publication-moat note, cite these as ratios
+  when exporting beyond the two repos.)
+
 - [ ] **Step 1.** Stand up `prolly-rdf4j-rest` out of band (its own Java 21 + Panama
   process); load a representative ontology (for example `pizza.owl` scaled up, or a
   deep-history synthetic record).
@@ -141,7 +191,9 @@ that needs no RDF4J upgrade, no Java 21 in Mobi, and no OSGi packaging of prolly
 - Delegating merge to prolly (D-4) — blocked until prolly's blank-node-correct merge
   ships.
 - Productionising the two-process deployment (supervision, security, the
-  distribution launching the sidecar) — a separate plan if the evaluation succeeds.
+  distribution launching the sidecar) —
+  [prolly-two-process-production](prolly-two-process-production.md), dormant
+  until this evaluation succeeds.
 
 ## Where this lives
 
