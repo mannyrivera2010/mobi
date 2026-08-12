@@ -128,6 +128,7 @@
 
         <module>com.mobi.prolly.record.api</module>
         <module>com.mobi.prolly.record.impl</module>
+        <module>com.mobi.prolly.record.grpc</module>
         <module>com.mobi.prolly.record.rest</module>
         <module>com.mobi.shacl.form.rest</module>
         <module>com.mobi.sse</module>

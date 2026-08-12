@@ -123,10 +123,14 @@ public class ProllyRecordVersioningService extends BaseVersioningService<ProllyV
         Resource mergeCommitId = super.mergeIntoMaster(record, sourceBranch, targetBranch, user, additions,
                 deletions, conflictMap, conn);
         if (parents != null) {
-            Resource headGraph = branchManager.getHeadGraph(targetBranch);
-            Model mergedState = new DynamicModelFactory().createEmptyModel();
-            mergedState.addAll(QueryResults.asModel(conn.getStatements(null, null, null, headGraph)));
-            applyMergeMirror(parents, mergedState, mergeCommitId, targetBranch, conn);
+            try {
+                Resource headGraph = branchManager.getHeadGraph(targetBranch);
+                Model mergedState = new DynamicModelFactory().createEmptyModel();
+                mergedState.addAll(QueryResults.asModel(conn.getStatements(null, null, null, headGraph)));
+                applyMergeMirror(parents, mergedState, mergeCommitId, targetBranch, conn);
+            } catch (Exception e) {
+                LOG.warn("Prolly merge mirror failed for {}; catalog merge stands", mergeCommitId, e);
+            }
         }
         return mergeCommitId;
     }
@@ -139,10 +143,14 @@ public class ProllyRecordVersioningService extends BaseVersioningService<ProllyV
         Resource mergeCommitId = super.mergeIntoBranch(record, sourceBranch, targetBranch, user, additions,
                 deletions, conflictMap, conn);
         if (parents != null) {
-            // no head graph on a non-master branch: the merged state is the compiled resource at
-            // the merge commit (a replay — the merge commit's own deltas are in the catalog)
-            Model mergedState = compiledResourceManager.getCompiledResource(mergeCommitId, conn);
-            applyMergeMirror(parents, mergedState, mergeCommitId, targetBranch, conn);
+            try {
+                // no head graph on a non-master branch: the merged state is the compiled resource
+                // at the merge commit (a replay — the merge commit's own deltas are in the catalog)
+                Model mergedState = compiledResourceManager.getCompiledResource(mergeCommitId, conn);
+                applyMergeMirror(parents, mergedState, mergeCommitId, targetBranch, conn);
+            } catch (Exception e) {
+                LOG.warn("Prolly merge mirror failed for {}; catalog merge stands", mergeCommitId, e);
+            }
         }
         return mergeCommitId;
     }
@@ -241,6 +249,18 @@ public class ProllyRecordVersioningService extends BaseVersioningService<ProllyV
         if (pending == null) {
             return;
         }
+        try {
+            doApplyMirror(pending, commitId, branch, message, conn);
+        } catch (Exception e) {
+            // dual write: the catalog commit is authoritative; a failed mirror degrades the
+            // prolly fast path for this commit but must never fail the user's commit
+            LOG.warn("Prolly mirror failed for commit {} in repo {}; catalog commit stands, reads "
+                    + "fall back to replay", commitId, pending.repoKey(), e);
+        }
+    }
+
+    private void doApplyMirror(PendingMirror pending, Resource commitId, Branch branch, String message,
+                               RepositoryConnection conn) {
         Model additions = pending.additions();
         Model deletions = pending.deletions();
         if (pending.parents().isEmpty()) {

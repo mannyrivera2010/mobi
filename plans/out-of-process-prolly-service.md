@@ -129,10 +129,11 @@ that needs no RDF4J upgrade, no Java 21 in Mobi, and no OSGi packaging of prolly
   confirms the shape on the store production runs and widens the gap: HEAD
   reads stay flat (38 / 25 / 60 ms at chain 10 / 100 / 1000; 52 ms at
   distance 0) while historical reads pay the disk penalty on top — distance
-  10 → 4 013 ms, 100 → 27 853 ms (~1.4× and ~9.5× the memory-store numbers);
-  the distance-500/999 cells had not finished at recording time — the
-  multi-minute runtime is itself the finding; append them when the run
-  completes. Chain build on disk: 46 s vs 7 s in memory.)
+  10 → 4 013 ms, 100 → 27 853 ms, **500 → 606 523 ms (10.1 min), 999 →
+  2 142 618 ms (35.7 min)** — the deep cells are ~24× and ~23× their
+  memory-store numbers, i.e. the disk penalty compounds with depth. Against
+  prolly's ≈1 ms flat snapshot (addendum below) the deep reads are five to six
+  orders of magnitude slower. Chain build on disk: 46 s vs 7 s in memory.)
 
   (**Addendum, same day — the prolly-rdf4j side, embedded structural bound.**
   A mirror benchmark (same workload: 1000 commits × 2 added triples, same

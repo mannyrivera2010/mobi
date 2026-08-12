@@ -292,6 +292,15 @@ client.)*
   the gRPC stubs from the client plan (or its REST fallback if the gRPC gate
   failed), configured by endpoint URL. A Pax-Exam IT boots the distribution with
   a prolly sidecar and runs the Goal's end-to-end scenario.
+
+  (Progress 2026-08-12, not yet complete: the gRPC client exists
+  (`com.mobi.prolly.record.grpc`, see the grpc plan's Step 1–4 wrap-ups),
+  deploys in the booted distribution, activates from `etc/*.cfg`, and
+  round-trips to a live prolly gRPC process. Remaining for the box: a server
+  deployment that registers `ProllyVersioningService` (Spring Boot RepoHost —
+  prolly-port side) and the Pax-Exam IT. Commit mirrors were also hardened:
+  a failed prolly mirror now degrades to replay with a warning instead of
+  failing the user's commit — dual-write failure isolation.)
 - [ ] **Step 11.** Measure and record: end-to-end read-at-commit for a prolly
   record versus the equivalent replay-backed record at increasing chain depth
   (reuse the out-of-process plan's Phase-0 harness; cold and warm client-cache

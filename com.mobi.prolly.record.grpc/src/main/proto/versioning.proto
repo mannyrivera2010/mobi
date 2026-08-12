@@ -1,0 +1,430 @@
+// VENDORED from prolly-port prolly-rdf4j-grpc/src/main/proto/versioning.proto
+// (single source of truth per plans/grpc-prolly-versioning-client.md D-2 —
+//  keep in lockstep with the server; do not edit here). Vendored 2026-08-12.
+// The ProllyVersioning service — the typed, out-of-process surface for the
+// versioning *verbs* a content-addressed prolly store exposes (commits,
+// branches, tags, snapshots, diff, garbage collection). SPARQL (query) stays on
+// HTTP; this carries the verbs HTTP does poorly and the bulk streaming a query
+// language cannot express. Plan: plans/grpc-versioning-service.md (Step 1
+// ratifies THIS file — the single source of truth the Mobi client vendors).
+// Commit metadata follows ADR-0045 (signed commits + commit-as-record).
+//
+// ── Contract version ─────────────────────────────────────────────────────────
+// The package pins the major version (`v1`); `ServerInfo.contract_version` pins
+// the precise revision for capability negotiation. A wire-incompatible change
+// owes a major bump + a client-coordinated migration — guard it with `buf
+// breaking` against the vendored consumer copy.
+//
+// ── Multi-tenant routing (ambient — documented HERE because it is request
+//    metadata, not a message field; protoc-gen-doc cannot see it) ─────────────
+// Every per-repo *data* call (Snapshot, Diff, Commit, branches, tags, log,
+// leases, …) carries its target repo in a `prolly-repo` request-metadata header
+// (the `{org}/{repo}` composite key), resolved by a RepoRoutingServerInterceptor
+// that mirrors the REST RepoRoutingInterceptor and looks the Sail up in the
+// shared registry. Those request messages therefore do NOT carry a repo field;
+// the field-less ones take `google.protobuf.Empty`. The *lifecycle* calls
+// (CreateRepo/GetRepo/ListRepos/DeleteRepo) carry the repo IN the message — you
+// cannot route to a repo you are creating, and ListRepos spans repos.
+// Consumer mapping (Mobi): each VersionedRDFRecord is one repo, so the
+// `prolly-repo` header is the record's key and switching records = switching it.
+//
+// ── Auth (ambient — like routing) ────────────────────────────────────────────
+// Credentials ride as request metadata, not a message field: the `x-api-key`
+// metadata key today (the ApiKeyServerInterceptor scheme, shared with sync.proto;
+// Step 11 may add a Bearer PAT / Basic equivalent). Missing/invalid => UNAUTHENTICATED.
+//
+// ── Errors ───────────────────────────────────────────────────────────────────
+//   missing / invalid credentials       => UNAUTHENTICATED
+//   unknown repo / branch / tag / commit => NOT_FOUND (on Get* and Delete*; Delete* are
+//                                          NOT idempotent — a missing target is NOT_FOUND,
+//                                          not a silent OK)
+//   Create* on an existing name         => ALREADY_EXISTS
+//   missing per-repo permission         => PERMISSION_DENIED
+//   a FLAT repo on a versioning verb    => FAILED_PRECONDITION  (a flat repo is a
+//                                          plain SPARQL store, not versioned)
+//   malformed / unverifiable signature  => INVALID_ARGUMENT
+//   lost commit / branch / merge race   => a NORMAL response (`stale_head` + `current_head` on
+//                                          CommitResult / SetBranchHeadResult / MergeResult), never an error code
+//
+// ── Encoding ─────────────────────────────────────────────────────────────────
+// Commit/term hashes are `bytes` (20-byte content hashes), not the 40-hex
+// strings the REST JSON layer uses — protobuf-native, half the wire size. Terms
+// are interned (see TermDictionary).
+// Timestamps are split by intent (not by accident): commit timestamps are `int64`
+// epoch-millis (CommitSpec / CommitMeta) — the hash- and signing-affecting internal
+// form a verifying client must reproduce exactly; presentational timestamps
+// (RepoInfo.created_at, Lease.expires_at) are `google.protobuf.Timestamp`.
+
+syntax = "proto3";
+
+package prolly.versioning.v1;
+
+option java_package = "com.earasoft.prolly.rdf4j.grpc.versioning";
+option java_outer_classname = "VersioningProto";
+option java_multiple_files = true;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// Versioning verbs over one repo (ambient via the `prolly-repo` header) plus the
+// repo-lifecycle calls (repo in the message). Reads + bulk transfers are
+// server-streamed in interned QuadChangeBatches; the mutable surface is a
+// compare-and-set on a branch head — a uniform `expected_head` guard with a
+// `stale_head`/`current_head` result across Commit, SetBranchHead, and Merge.
+service ProllyVersioning {
+  // ── Repo lifecycle (repo carried in the message, not the routing header) ──
+  rpc CreateRepo (CreateRepoRequest) returns (RepoInfo);
+  rpc GetRepo    (RepoRef)           returns (RepoInfo);
+  rpc ListRepos  (ListReposRequest)  returns (stream RepoInfo);
+  rpc DeleteRepo (RepoRef)           returns (google.protobuf.Empty);
+
+  // ── Reads ──
+  // Server-stream the whole graph at a commit as interned QuadChangeBatches (all
+  // INSERT). If `have` is set and equals the resolved target, the server
+  // returns a single batch with `unchanged = true` and no quads (the client
+  // already holds it). A snapshot is immutable (content-addressed): batches are
+  // cacheable by commit hash, and the stream is **resumable** — on a
+  // dropped connection re-issue with `resume_token` = the last batch's
+  // `resume_token` (deterministic order at a fixed commit).
+  rpc Snapshot (SnapshotRequest) returns (stream QuadChangeBatch);
+  // Server-stream the quad-level delta from `req.from` to `req.to`. INSERT =
+  // in `to` not `from`; DELETE = in `from` not `to`. Resumable via `resume_token`.
+  rpc Diff         (DiffRequest) returns (stream QuadChangeBatch);
+  // The lowest common ancestor of two commits — the base for a 3-way merge. For a
+  // client that merges itself; for server-side merging use `Merge`.
+  rpc GetMergeBase (CommitPair) returns (CommitId);
+
+  // ── Writes ──
+  // Apply a delta on top of the branch head and record a commit (ADR-0045
+  // CommitSpec). Optimistic concurrency: if `expected_head` is no longer the
+  // head, the server returns a normal CommitResult with `stale_head = true` +
+  // `current_head` (rebase + retry) — never a wrong-write, never an error code. The
+  // `expected_head` guard + `stale_head`/`current_head` result are uniform across
+  // Commit, SetBranchHead, and Merge.
+  rpc Commit   (CommitRequest)             returns (CommitResult);
+  // Client-stream a large initial import as interned QuadChangeBatches, accumulated
+  // into one commit — avoids a single multi-gigabyte Commit message.
+  rpc BulkLoad (stream BulkLoadChunk)      returns (CommitResult);
+  // Server-side 3-way merge of `theirs` into `ours` via the MergeEngine: records a
+  // two-parent merge commit and compare-and-sets `target_branch`. Two distinct failure
+  // modes, both normal responses: `merge_conflict` (unresolvable 3-way conflicts, see
+  // `conflicts`) and `stale_head` (the target moved — the same lost-race shape as Commit).
+  // PARITY with the existing HTTP `POST /branches/{target}/merge` (the same MergeEngine) —
+  // it brings the verb onto the gRPC surface, not new capability. For client-driven merge
+  // (e.g. a conflict-resolution UI), use GetMergeBase + Diff instead.
+  rpc Merge    (MergeRequest)              returns (MergeResult);
+
+  // ── Commit log ──
+  rpc ListCommits (CommitRange) returns (stream CommitMeta); // ancestry / log
+  rpc GetCommit   (CommitRef)   returns (CommitMeta);        // one commit's metadata
+  rpc HasCommit   (CommitRef)   returns (Exists);            // existence probe
+
+  // ── Branches (the RefsStore; the only mutable, coordinated state) ──
+  rpc ListBranches   (google.protobuf.Empty) returns (stream BranchInfo);
+  rpc GetBranchHead  (BranchRef)             returns (CommitId);
+  rpc GetBranchHeads (BranchRefs)            returns (BranchHeads);   // batched
+  rpc CreateBranch   (CreateBranchRequest)   returns (BranchInfo);
+  // Compare-and-set a branch head (merge result / reset / fast-forward). A failed
+  // compare-and-set is a normal response with `stale_head = true` + `current_head`, not an error.
+  rpc SetBranchHead  (SetBranchHeadRequest)  returns (SetBranchHeadResult);
+  rpc DeleteBranch   (BranchRef)             returns (google.protobuf.Empty);
+
+  // ── Tags (immutable named commit pointers; reachability roots, like branches) ──
+  rpc CreateTag       (CreateTagRequest)     returns (TagInfo);
+  rpc ListTags        (google.protobuf.Empty) returns (stream TagInfo);
+  rpc GetTaggedCommit (TagRef)               returns (CommitId);
+  rpc DeleteTag       (TagRef)               returns (google.protobuf.Empty);
+
+  // ── Garbage collection & snapshot leases (cross-process reclamation safety) ──
+  rpc RunGarbageCollection (GcRequest)    returns (GcResult); // mark-and-sweep; admin/scheduled
+  rpc AcquireSnapshotLease (LeaseRequest) returns (Lease);    // pin a commit as a reachability root
+  rpc RenewSnapshotLease   (LeaseId)      returns (Lease);    // renew before expiry
+  rpc ReleaseSnapshotLease (LeaseId)      returns (google.protobuf.Empty);
+
+  // ── Server (capability negotiation — never assume a partly-future feature) ──
+  rpc GetServerInfo (google.protobuf.Empty) returns (ServerInfo);
+}
+
+// ── Identity ─────────────────────────────────────────────────────────────────
+
+// A content hash. Empty `hash` means "no commit" (an empty branch).
+message CommitId { bytes hash = 1; }
+
+// A reference to a commit. Currently a bare CommitId; a oneof (branch/tag name)
+// may be added later behind a contract bump.
+message CommitRef { CommitId id = 1; }
+
+// An ordered pair of commits for Diff / GetMergeBase.
+message CommitPair { CommitId from = 1; CommitId to = 2; }
+
+// Repo identity for lifecycle calls: the `{org}/{repo}` composite, or bare `{repo}`.
+message RepoRef { string repo = 1; }
+
+message Exists { bool exists = 1; }
+
+// Which storage backend a repo uses. FLAT repos reject the versioning verbs with
+// FAILED_PRECONDITION (see ADR / the sail-type gate).
+enum SailType {
+  SAIL_TYPE_UNSPECIFIED = 0;
+  PROLLY = 1; // versioned: prolly tree, commits, branches, snapshots
+  FLAT   = 2; // a plain RocksDB RDF store — no versioning surface
+}
+
+// ── Repo lifecycle ───────────────────────────────────────────────────────────
+
+message CreateRepoRequest {
+  string repo = 1;             // {org}/{repo} or {repo}
+  string description = 2;
+  bool is_public = 3;
+  SailType sail_type = 4;      // UNSPECIFIED => PROLLY (ADR-0045 / RepoMetadata default)
+}
+
+message RepoInfo {
+  string repo = 1;
+  string description = 2;
+  bool is_public = 3;
+  SailType sail_type = 4;
+  google.protobuf.Timestamp created_at = 5;
+  string created_by = 6;
+}
+
+// Cursor-based pagination + limit, uniform with ListCommits (CommitRange): pass the last
+// repo of the previous page as `after_repo` (a stable cursor — NOT a positional offset,
+// which is fragile under concurrent create/delete). Empty `after_repo` = the first page.
+message ListReposRequest { uint32 limit = 1; string after_repo = 2; }
+
+// ── Term interning ───────────────────────────────────────────────
+
+// The term strings referenced by THIS batch — **self-contained**: a
+// Quad's indices are 1-based into *this* batch's `terms` only, never a
+// cross-batch running dictionary. Self-containment is what makes a batch
+// cacheable by commit hash, a dropped stream resumable batch-by-batch, and
+// batches parallelizable. Interning stays intra-batch (a predicate used many
+// times in one batch is sent once) — for a batch of thousands of quads that
+// captures nearly all of the interning benefit.
+//
+// Each term is the store's **canonical term form**: the exact string
+// that round-trips through `TermCodec` to the identical internal term. It is
+// HASH-AFFECTING, so a client MUST NOT re-canonicalize it, and it is NOT generic
+// N-Triples. The rules are pinned by `spec-compliance/semantics/canonicalization.md`
+// + `datatype-identity.md`: datatype identity is explicit, `rdf:langString`
+// follows the codec's language-tag handling, and blank-node labels are the
+// URDNA2015-canonical form scoped to this stream.
+message TermDictionary { repeated string terms = 1; }
+
+// A quad as four 1-based indices into THIS batch's `TermDictionary`
+// (self-contained). `g = 0` denotes the default graph; `s`/`p`/`o` >= 1.
+message Quad {
+  uint32 s = 1;
+  uint32 p = 2;
+  uint32 o = 3;
+  uint32 g = 4;
+}
+
+enum ChangeKind {
+  CHANGE_KIND_UNSPECIFIED = 0;
+  INSERT = 1;
+  DELETE = 2;
+}
+
+message QuadChange {
+  Quad quad = 1;
+  ChangeKind kind = 2; // INSERT for a Snapshot (all adds); INSERT/DELETE for Diff/Commit
+}
+
+// A self-contained batch of quad changes plus the term dictionary it references
+// (batch-local indices). The unit of streaming for Snapshot, Diff, and the Commit
+// delta. Self-containment is what makes a batch cacheable by commit hash
+// and a dropped stream resumable batch-by-batch.
+message QuadChangeBatch {
+  repeated QuadChange changes = 1;
+  TermDictionary dict = 2;
+  bool unchanged = 3;     // set on the sole batch when the client's `have` already matches
+  bytes resume_token = 4; // opaque cursor AFTER this batch — pass back as the request resume_token to resume
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+message SnapshotRequest {
+  CommitRef target = 1;
+  CommitId have = 2;      // if set and == resolved target, server returns `unchanged` and streams nothing
+  bytes resume_token = 3; // empty = from the start; else resume after this cursor (a prior batch's resume_token)
+}
+
+// Diff request — carries the resume cursor that CommitPair (shared with GetMergeBase) must not.
+message DiffRequest {
+  CommitId from = 1;
+  CommitId to = 2;
+  bytes resume_token = 3; // resume after this cursor (empty = from the start)
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+
+// ADR-0045: an immutable, validated commit-intent value. Replaces the mutable
+// setNextCommit* staging. The hash EXCLUDES the signature (D-3) — the signature
+// signs the same canonical payload the hash commits to.
+message CommitSpec {
+  string author = 1;                 // required (non-blank)
+  string message = 2;                // required (non-blank)
+  int64 timestamp_millis = 3;        // 0 => server now()
+  repeated CommitId extra_parents = 4; // merge parents beyond the branch head
+  CommitSignature signature = 5;     // optional
+}
+
+message CommitSignature {
+  string algorithm = 1;       // ssh-ed25519 | ssh-rsa | ecdsa-sha2-nistp256
+  string key_fingerprint = 2; // sha256 fp — the same id used by POST /auth/keys
+  bytes signature = 3;
+}
+
+message CommitRequest {
+  CommitId expected_head = 1; // the uniform optimistic-concurrency guard: must still be the branch head
+  CommitSpec spec = 2;
+  QuadChangeBatch delta = 3;  // the mutations to apply (INSERT/DELETE)
+}
+
+message BulkLoadChunk {
+  CommitSpec spec = 1;          // sent once, on the first chunk; ignored thereafter
+  QuadChangeBatch quads = 2;    // INSERT-only, accumulated into one commit
+}
+
+message CommitResult {
+  CommitId commit = 1;       // the new commit (unset when stale_head = true)
+  bool no_op = 2;            // true when the delta changed nothing (the commit was elided)
+  bool stale_head = 3;       // lost the optimistic-concurrency race (expected_parent moved) — a NORMAL response, not an error
+  CommitId current_head = 4; // the head the server holds now (rebase the delta onto this + retry)
+}
+
+// ── Merge (server-side 3-way, via the MergeEngine; gap 6) ────────────────────
+
+message MergeRequest {
+  CommitId ours = 1;        // the target head AND the compare-and-set guard (the `expected_head` of Commit/SetBranchHead, named `ours` for git merge symmetry)
+  CommitId theirs = 2;      // the source being merged in
+  CommitId base = 3;        // optional explicit merge-base; unset => server computes it (the GetMergeBase result)
+  string target_branch = 4; // the branch to advance (compare-and-set on `ours`)
+  CommitSpec spec = 5;      // the merge commit's metadata (author/message/optional signature)
+}
+
+message MergeResult {
+  CommitId commit = 1;                 // the merge commit (unset on merge_conflict or stale_head)
+  bool merge_conflict = 2;             // unresolvable 3-way conflicts (see `conflicts`); nothing written — a SEMANTIC failure
+  bool no_op = 3;                      // `theirs` already reachable from `ours` (nothing to merge)
+  uint32 incoming_count = 4;           // quads brought in (MergeEngine.incomingCount)
+  repeated MergeConflict conflicts = 5;
+  bool stale_head = 6;                 // lost the compare-and-set race on `target_branch` (a CONCURRENCY failure, like Commit) — retry
+  CommitId current_head = 7;           // the head the server holds now (set when stale_head = true)
+}
+
+message MergeConflict {
+  Quad quad = 1;           // the conflicting quad (indices into `dict`)
+  TermDictionary dict = 2; // self-contained terms for this conflict
+  string detail = 3;       // human-readable description
+}
+
+// ── Commit log ───────────────────────────────────────────────────────────────
+
+message CommitMeta {
+  CommitId id = 1;
+  repeated CommitId parents = 2;
+  string message = 3;
+  string author = 4;
+  int64 timestamp_millis = 5;    // epoch-millis — the SAME hash/signing-affecting form as CommitSpec and the
+                                 //        internal Commit.timestamp (NOT a display Timestamp); consistency is required for verify
+  bytes root_value_hash = 6;     // the tree content hash — part of the ADR-0045 signing payload
+  CommitSignature signature = 7; // present iff signed; with {root_value_hash, parents, author, timestamp, message}
+                                 //        a client can recompute the canonical payload and verify independently
+}
+
+// Walk ancestry from `start` (default: every branch head), newest-first,
+// bounded by `limit`.
+message CommitRange {
+  CommitId start = 1;
+  uint32 limit = 2;
+}
+
+// ── Branches ─────────────────────────────────────────────────────────────────
+
+message BranchRef { string branch = 1; }            // repo ambient (header)
+message BranchRefs { repeated string branches = 1; } // batched head lookup
+
+message BranchInfo {
+  string branch = 1;
+  CommitId head = 2;
+}
+
+message BranchHeads {
+  map<string, CommitId> heads = 1; // branch name -> head (absent key => unknown branch)
+}
+
+message CreateBranchRequest {
+  string branch = 1;
+  CommitId from = 2; // the commit (or another branch's head) to fork from
+}
+
+message SetBranchHeadRequest {
+  string branch = 1;
+  CommitId expected_head = 2; // the uniform compare-and-set guard (empty = create-if-absent)
+  CommitId desired = 3;
+}
+
+message SetBranchHeadResult {
+  bool stale_head = 1;       // true = lost the compare-and-set race (expected moved) — a NORMAL response, not an error
+  CommitId current_head = 2; // the head the server holds now (on success == the desired head)
+}
+
+// ── Tags ─────────────────────────────────────────────────────────────────────
+
+message TagRef { string tag = 1; }
+
+message CreateTagRequest {
+  string tag = 1;
+  CommitId commit = 2;
+  string message = 3;
+}
+
+message TagInfo {
+  string tag = 1;
+  CommitId commit = 2;
+  string message = 3;
+}
+
+// ── Garbage collection & snapshot leases ─────────────────────────────────────
+
+message GcRequest { bool dry_run = 1; }
+
+message GcResult {
+  uint64 chunks_swept = 1;
+  uint64 bytes_reclaimed = 2;
+  uint64 chunks_retained = 3;
+}
+
+// Pin a commit as a reachability root so concurrent garbage collection cannot
+// reclaim it while a long read is in flight (cross-process safety).
+message LeaseRequest {
+  CommitId commit = 1;
+  uint32 ttl_seconds = 2;
+}
+
+message LeaseId { string lease_id = 1; }
+
+message Lease {
+  string lease_id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+// ── Server capability negotiation ────────────────────────────────────────────
+
+message ServerInfo {
+  string server_version = 1;   // the prolly-server build
+  string contract_version = 2; // this proto's precise revision (e.g. "1.0")
+  repeated string capabilities = 3; // opt-in features a client must not assume (e.g. "bulk-load", "signed-commits")
+  // Honesty flags — the consumer discovers the server's real merge/read characteristics rather than
+  // assuming them (plan Step 7). Both are intrinsic to this server build.
+  // True: the server's Merge is conflict-free for RDF (a quad has no value, so a 3-way merge of
+  // quad-sets cannot value-conflict) but does NOT canonicalize blank nodes — the client must keep its
+  // own blank-node-correct merge. (Named for the policy: effectively a union, never a CONFLICT result.)
+  bool set_union_merge_only = 4;
+  // True when the server pushes typed-range predicates down into reads. Not built yet → false; a client
+  // must be able to discover this partly-future capability, never assume it.
+  bool typed_range_pushdown = 5;
+}

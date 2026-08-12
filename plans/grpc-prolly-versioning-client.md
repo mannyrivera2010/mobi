@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: active
 priority: P2
 category: persistence
 epic: storage-backend
@@ -13,7 +13,7 @@ server half is `prolly-port/plans/grpc-versioning-service.md` in the prolly-port
 Together they realize the gRPC transport that
 [ADR-0002](../docs/adr/0002-out-of-process-prolly-rdf4j-over-a-network-boundary.md)
 selects for Strategy B, and the gRPC path of the
-[out-of-process plan](out-of-process-prolly-service.md). Proposed, not started.
+[out-of-process plan](out-of-process-prolly-service.md). Active; Phases 1–2 landed 2026-08-12 — the gRPC-in-Karaf gate PASSED (see Step 1–2 wrap-ups).
 The Phase-0 gate reported 2026-08-12: the replay cost is real but **scoped to
 reads behind head** (master-HEAD reads are already O(1) via the materialized
 HEAD graph — see the out-of-process plan's Step 0 wrap-up), so the snapshot
@@ -106,20 +106,48 @@ current replay and the SPARQL-over-HTTP alternative.
 
 ## Phase 1 — De-risk gRPC inside Karaf (do this before anything else)
 
-- [ ] **Step 1.** Stand up a throwaway gRPC echo service; prove a Mobi OSGi bundle
+- [x] **Step 1.** Stand up a throwaway gRPC echo service; prove a Mobi OSGi bundle
   can open a `ManagedChannel` and round-trip to it inside the running Karaf
   distribution (grpc-netty-shaded on the bundle classpath, native/`Bundle-NativeCode`
   resolved). Record exactly what bundling was required.
-- [ ] **Step 2 (gate).** If gRPC cannot be bundled cleanly, **stop the gRPC path**
+
+  (Landed 2026-08-12 — no throwaway echo needed: the spike ran against the real
+  `GrpcSyncServer` standalone dev main. **The round-trip works**: from the booted
+  Karaf, the client's `GetServerInfo` call reached the server and received a
+  gRPC status over HTTP/2 (an `UNIMPLEMENTED` status — see the gap below — which
+  IS a completed protocol round-trip). The bundling recipe that works:
+  a **fat bundle** (`Embed-Dependency *;scope=compile|runtime` + transitive:
+  22 jars, 18 MB — grpc-netty-shaded/core/api/stub/protobuf, protobuf-java,
+  guava); build the channel with the **shaded `NettyChannelBuilder` directly**,
+  never `ManagedChannelBuilder.forAddress` (ServiceLoader discovery is
+  unreliable under OSGi); `javax.annotation-api` provided for the generated
+  `@Generated`; stubs in `Private-Package`; wildcard imports optional. No
+  `Bundle-NativeCode` needed — shaded Netty's JNI loads from the embedded jar.)
+- [x] **Step 2 (gate).** If gRPC cannot be bundled cleanly, **stop the gRPC path**
   and pursue ADR-0002 Option C (prolly's existing REST) instead; record the
   decision. Otherwise proceed.
 
+  (**Gate PASSED 2026-08-12** — gRPC bundles cleanly per Step 1; the gRPC path
+  proceeds. Two SERVER-side gaps discovered for the lockstep server plan
+  (`prolly-port/plans/grpc-versioning-service.md`): (1) the standalone dev
+  server registers only the sync service — `ProllyVersioningService` is wired
+  only via the Spring Boot `GrpcSyncAutoConfiguration` + `RepoHost`, so the
+  full e2e needs that deployment; (2) the `Commit` RPC applies only onto the
+  repo's live head line — Mobi's branch-tip commits have no RPC to land on a
+  non-head parent, so branch mirroring over gRPC degrades to skip-with-warn
+  until the server grows commit-on-parent.)
+
 ## Phase 2 — Generate the client from the shared contract
 
-- [ ] **Step 3.** Add a new module (for example `com.mobi.versioning.grpc.client`),
+- [x] **Step 3.** Add a new module (for example `com.mobi.versioning.grpc.client`),
   vendor `versioning.proto` from the prolly-rdf4j-grpc module, and wire
   `protobuf-maven-plugin` to generate the stubs. Pin the contract version.
-- [ ] **Step 4.** Implement a thin Java client over the generated stubs:
+
+  (Landed 2026-08-12 as `com.mobi.prolly.record.grpc`: `versioning.proto`
+  vendored with a provenance header, stubs generated Java-17 (protoc 3.25.5 +
+  grpc 1.71.0 — the prolly jar's own stubs are Java-25 bytecode and unusable
+  in Mobi's runtime, confirming D-2's vendor-and-generate).)
+- [x] **Step 4.** Implement a thin Java client over the generated stubs:
   `snapshot(commit)`, `commit(delta, parents, message)`,
   `createBranch`, `getBranchHead`, `diff(a, b)`, `getMergeBase(a, b)`.
   **Decode the performance contract (D-6):** consume `QuadBatch` streams and un-intern
@@ -131,6 +159,16 @@ current replay and the SPARQL-over-HTTP alternative.
   **Address the repo per call (D-8):** set the `prolly-repo` request-metadata header to the
   record's repo key — a deterministic function of the record IRI — so one channel serves
   every record and switching records is just switching the header (no per-record channel).
+
+  (Landed 2026-08-12: `GrpcProllyVersioningClient` implements the full
+  `ProllyVersioningClient` boundary — repo lifecycle, snapshot/diff streamed
+  batch decode, commit with interned batch encode + `expected_head` guard,
+  branch CAS ops, merge-base, leases — config-gated (`endpoint` cfg required;
+  `service.ranking=100` outranks the in-memory fake), one channel + per-call
+  `prolly-repo` header, N-Triples term codec (the server's own encoding).
+  **D-6 partial**: the client-side snapshot cache keyed by commit hash and the
+  `have`-commit skip are NOT yet implemented — they matter for Step 6's
+  measurement, not correctness.)
 
 ## Phase 3 — Strategy B read path (the actual win)
 

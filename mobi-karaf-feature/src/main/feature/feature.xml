@@ -265,6 +265,7 @@
         <bundle>mvn:com.mobi/shapes.impl/${project.version}</bundle>
         <bundle>mvn:com.mobi/prolly.record.api/${project.version}</bundle>
         <bundle>mvn:com.mobi/prolly.record.impl/${project.version}</bundle>
+        <bundle>mvn:com.mobi/prolly.record.grpc/${project.version}</bundle>
         <bundle>mvn:com.mobi/owlapi.utils/${project.version}</bundle>
         <bundle>mvn:com.mobi/shacl.form.api/${project.version}</bundle>
         <bundle>mvn:com.mobi/workflows.api/${project.version}</bundle>
