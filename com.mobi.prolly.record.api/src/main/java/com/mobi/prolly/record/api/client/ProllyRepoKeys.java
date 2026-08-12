@@ -39,6 +39,9 @@ public final class ProllyRepoKeys {
 
     private static final int SLUG_MAX = 80;
     private static final int HASH_CHARS = 16;
+    // server-side repoId rules: max 63 chars AND no '/' in a bare (non-org) repoId — the
+    // path-traversal guard rejects it. Flat "mobi-<slug>-<hash16>" fits both.
+    private static final int REPO_SLUG_MAX = 63 - "mobi-".length() - 1 - HASH_CHARS;
 
     private ProllyRepoKeys() {
     }
@@ -53,14 +56,17 @@ public final class ProllyRepoKeys {
         return slug + "-" + sha256Hex(iri).substring(0, HASH_CHARS);
     }
 
-    /** The repo key for a record IRI — stable across calls, {@code records/<slug>-<hash16>}. */
+    /**
+     * The repo key for a record IRI — stable across calls, {@code mobi-<slug>-<hash16>}: within
+     * the server's 63-char repoId limit and slash-free (a bare repoId rejects '/').
+     */
     public static String forRecord(Resource recordIri) {
         String iri = recordIri.stringValue();
         String slug = iri.replaceAll("^https?://", "").replaceAll("[^A-Za-z0-9_.-]", "-");
-        if (slug.length() > SLUG_MAX) {
-            slug = slug.substring(slug.length() - SLUG_MAX);
+        if (slug.length() > REPO_SLUG_MAX) {
+            slug = slug.substring(slug.length() - REPO_SLUG_MAX);
         }
-        return "records/" + slug + "-" + sha256Hex(iri).substring(0, HASH_CHARS);
+        return "mobi-" + slug + "-" + sha256Hex(iri).substring(0, HASH_CHARS);
     }
 
     private static String sha256Hex(String value) {

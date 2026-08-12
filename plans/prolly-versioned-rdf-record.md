@@ -293,14 +293,21 @@ client.)*
   failed), configured by endpoint URL. A Pax-Exam IT boots the distribution with
   a prolly sidecar and runs the Goal's end-to-end scenario.
 
-  (Progress 2026-08-12, not yet complete: the gRPC client exists
-  (`com.mobi.prolly.record.grpc`, see the grpc plan's Step 1–4 wrap-ups),
-  deploys in the booted distribution, activates from `etc/*.cfg`, and
-  round-trips to a live prolly gRPC process. Remaining for the box: a server
-  deployment that registers `ProllyVersioningService` (Spring Boot RepoHost —
-  prolly-port side) and the Pax-Exam IT. Commit mirrors were also hardened:
-  a failed prolly mirror now degrades to replay with a warning instead of
-  failing the user's commit — dual-write failure isolation.)
+  (Progress 2026-08-12, substantively verified — box open only for the
+  Pax-Exam IT automation. The full manual e2e ran against the REAL sidecar:
+  `prolly-server` (Spring Boot, RocksDB store, gRPC on 19090,
+  `--prolly.rdf4j.grpc.enabled=true`) + the booted distribution with the
+  gRPC client configured. Record create → repo appears in the server's
+  `/repos`; catalog commits appear in the server's own commit log with correct
+  messages and parent linkage; a behind-head read via Mobi REST returns the
+  correct historical state served by the gRPC snapshot; record delete removes
+  the server-side repo. Two repo-key corrections forced by the server's real
+  validation (the plans' `{1,128}` rule is for BRANCH names): repoIds max 63
+  chars and bare repoIds reject '/', so keys are now flat
+  `mobi-<slug>-<hash16>` (`ProllyRepoKeysTest` pins both bounds). Commit
+  mirrors also hardened: a failed mirror degrades to replay with a warning
+  instead of failing the user's commit. Module suite 26/26. Remaining:
+  the Pax-Exam IT that automates this scenario, and Step 11's measurement.)
 - [ ] **Step 11.** Measure and record: end-to-end read-at-commit for a prolly
   record versus the equivalent replay-backed record at increasing chain depth
   (reuse the out-of-process plan's Phase-0 harness; cold and warm client-cache
