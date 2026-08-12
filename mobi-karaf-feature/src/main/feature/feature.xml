@@ -263,6 +263,8 @@
         <bundle>mvn:com.mobi/namespace.api/${project.version}</bundle>
         <bundle>mvn:com.mobi/shapes.api/${project.version}</bundle>
         <bundle>mvn:com.mobi/shapes.impl/${project.version}</bundle>
+        <bundle>mvn:com.mobi/prolly.record.api/${project.version}</bundle>
+        <bundle>mvn:com.mobi/prolly.record.impl/${project.version}</bundle>
         <bundle>mvn:com.mobi/owlapi.utils/${project.version}</bundle>
         <bundle>mvn:com.mobi/shacl.form.api/${project.version}</bundle>
         <bundle>mvn:com.mobi/workflows.api/${project.version}</bundle>
@@ -291,6 +293,7 @@
         <bundle>mvn:com.mobi/explorable.dataset.rest/${project.version}</bundle>
         <bundle>mvn:com.mobi/prov.rest/${project.version}</bundle>
         <bundle>mvn:com.mobi/shapes.rest/${project.version}</bundle>
+        <bundle>mvn:com.mobi/prolly.record.rest/${project.version}</bundle>
         <bundle>mvn:com.mobi/workflows.rest/${project.version}</bundle>
         <bundle>mvn:com.mobi/shacl.form.rest/${project.version}</bundle>
         <bundle>mvn:com.mobi/setting.rest/${project.version}</bundle>

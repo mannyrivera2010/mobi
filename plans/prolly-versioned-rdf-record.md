@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: active
 priority: P2
 category: catalog
 epic: storage-backend
@@ -12,7 +12,10 @@ content is stored in an out-of-process prolly-rdf4j repo instead of the catalog'
 delta chain. The record *type* is the routing mechanism: the catalog's existing
 type-dispatch (RecordService / VersioningService keyed by type IRI) sends
 lifecycle and commit operations to prolly, while ordinary records are untouched.
-Proposed, not started. **Depends on**
+Active; Phases 1–4 complete 2026-08-12 (all verified in a booted distribution
+against the in-memory fake client — see step wrap-ups; the write path landed as
+a dual write, a deliberate refinement of D-4). Phase 5 remains gated.
+**Depends on**
 [grpc-prolly-versioning-client](grpc-prolly-versioning-client.md) (same epic —
 serialize: its Phases 1–2 must land before this plan's Phase 5 goes live; Phases
 1–4 here run against a fake client and are unblocked).
@@ -26,7 +29,10 @@ record), the catalog holding only record/branch/commit *metadata*, and every
 existing record type behaving exactly as before. Acceptance: a Karaf-booted
 distribution plus a prolly sidecar passes an end-to-end
 create → commit → branch → merge → read-at-commit integration test, and the full
-existing catalog test suite stays green.
+existing catalog test suite stays green. *(Status 2026-08-12: everything up to
+"plus a prolly sidecar" holds — the e2e ran in a booted distribution against the
+in-memory fake client; the sidecar variant is Phase 5, gated on the gRPC
+client.)*
 
 ## Decisions
 
@@ -117,14 +123,23 @@ existing catalog test suite stays green.
 
 ## Phase 1 — Scaffold the type (no prolly involved)
 
-- [ ] **Step 1.** Create `com.mobi.prolly.record.api`: `prolly-record.ttl`
+- [x] **Step 1.** Create `com.mobi.prolly.record.api`: `prolly-record.ttl`
   declaring `ProllyVersionedRDFRecord rdfs:subClassOf mcat:VersionedRDFRecord`, a
   `prollyRepoKey` datatype property on the record, and a `prollyCommitHash`
   datatype property with domain `mcat:Commit`; rdf-orm-maven-plugin execution
   referencing `mcat.ttl` + `prov-o.ttl`. Verify the generated
   `ProllyVersionedRDFRecordFactory` round-trips the new properties in a unit
   test.
-- [ ] **Step 2.** Create `com.mobi.prolly.record.impl` with
+
+  (Landed 2026-08-12. Two corrections: `prollyCommitHash` got an ORM holder by
+  declaring `:ProllyCommit rdfs:subClassOf mcat:Commit` — a bare property with
+  a referenced-ontology domain has no generated class to live on; and the
+  round-trip test lives in the *impl* module — no api module in the repo
+  carries `OrmEnabledTestCase` scaffolding, so the impl is the convention.
+  Generated interfaces verified: `ProllyVersionedRDFRecord extends
+  VersionedRDFRecord`, `ProllyCommit extends Commit`, `Optional<String>`
+  accessors. Tests in Step 2's count.)
+- [x] **Step 2.** Create `com.mobi.prolly.record.impl` with
   `SimpleProllyVersionedRDFRecordService extends AbstractVersionedRDFRecordService<ProllyVersionedRDFRecord>`
   — at this step a pure clone of the minimal pattern (factory `@Reference`,
   `@Activate`, `getType`/`getTypeIRI`) — plus
@@ -132,7 +147,14 @@ existing catalog test suite stays green.
   with only `getTypeIRI()` overridden (base behavior otherwise). Both poms get
   `_dsannotations-options=inherit`. Port the shapes service test pattern;
   creating/deleting a record must behave exactly like a plain versioned record.
-- [ ] **Step 3.** Wire the surface: creation system policy
+
+  (Landed 2026-08-12. Both services are the minimal clones as planned; the
+  ported test exercises the full base `create` flow (record + master branch +
+  initial commit + policies from the test-resource templates) plus type
+  identity and `checkForMissingPolicies`. 7/7 tests green in
+  `com.mobi.prolly.record.impl` — 3 ORM round-trip, 3 record service, 1
+  versioning.)
+- [x] **Step 3.** Wire the surface: creation system policy
   (copy `mobi-distribution/src/main/resources/etc/policies/systemPolicies/http%3A%2F%2Fmobi.com%2Fpolicies%2Fshapes-graph-record-creation.xml`,
   swap type IRI and RuleIds); `com.mobi.prolly.record.rest` with a `@POST`
   create endpoint carrying the `@ActionAttributes` type attribute; reactor
@@ -140,16 +162,38 @@ existing catalog test suite stays green.
   `<bundle>` lines. Verify by booting the distribution and creating/deleting a
   record via REST as a non-admin user (policy fires).
 
+  (Landed 2026-08-12, verified in a booted distribution: POST
+  `/mobirest/prolly-records` → 201 with recordId/branchId/commitId; the stored
+  record carries the full type chain; DELETE dispatches to the prolly
+  RecordService by most-specific type and the record 404s after. Verification
+  ran as `admin` — the non-admin policy check is covered by the policy XML
+  mirroring the proven shapes template, not yet by a second live user. **The
+  boot refuted Step 2's re-export guidance:** `Export-Package
+  com.mobi.catalog.api.record/versioning;provide:=true` (copied from
+  `com.mobi.shapes.impl/pom.xml:116-119`) makes bnd EMBED those classes, and
+  `BaseVersioningService`'s static init then can't find its root-level `.rq`
+  resources — `NoClassDefFoundError` at DS instantiation. Fix: export only
+  `com.mobi.prolly.record.impl*`; the plain import wires to catalog.api where
+  the resources live. shapes.impl has the identical latent construction and
+  survives only by resolver substitution — flagged as a follow-on.)
+
 ## Phase 2 — Repo lifecycle against the client interface
 
-- [ ] **Step 4.** Define `ProllyVersioningClient` in the api module:
+- [x] **Step 4.** Define `ProllyVersioningClient` in the api module:
   `createRepo(key)` / `deleteRepo(key)`, `snapshot(repoKey, commitHash)`
   (streaming), `commit(repoKey, delta, parents, message)`,
   `createBranch` / `deleteBranch` / `getBranchHead` / `setBranchHead`,
   `diff(a, b)`, `getMergeBase(a, b)`, `acquireSnapshotLease` / `renewLease` /
   `releaseLease`. Ship an in-memory fake (a map of repos of commit-DAGs) with
   its own contract test — the fake is the test harness for Phases 2–4.
-- [ ] **Step 5.** Override `createRecord`/`deleteRecord` in the record service:
+
+  (Landed 2026-08-12. The fake is content-addressed for real — commit hashes are
+  SHA-256 over parents + canonicalized state, so identical histories hash
+  identically, verified by test. Registered as a DS component so the
+  distribution runs without a prolly process; javadoc marks it non-persistent.
+  `ProllyRepoKeys.forRecord` produces `records/<slug>-<hash16>` within prolly's
+  name rules. 8/8 contract tests.)
+- [x] **Step 5.** Override `createRecord`/`deleteRecord` in the record service:
   create → derive the repo key (deterministic slug of the record IRI, matching
   the client plan's D-8 validator rules `[A-Za-z0-9_./-]{1,128}`), call
   `createRepo`, store `prollyRepoKey` on the record; a failed `createRepo` fails
@@ -157,9 +201,16 @@ existing catalog test suite stays green.
   commits (an orphaned prolly repo is reclaimable; a record pointing at a
   deleted repo is not). Tests against the fake, including both failure orders.
 
+  (Landed 2026-08-12. `createRecord` mirrors the base body with `createRepo`
+  before any catalog write and a compensating `deleteRepo` in the failure
+  path; `delete` calls super then best-effort `deleteRepo`, logging a warning
+  on failure. Both failure orders tested: repo-create failure never reaches
+  `versioningManager.commit`; catalog failure leaves zero repos behind.
+  Module suite 18/18.)
+
 ## Phase 3 — Write path (commits and branches into prolly)
 
-- [ ] **Step 6.** Override `addMasterCommit`/`addBranchCommit` in
+- [x] **Step 6.** Override `addMasterCommit`/`addBranchCommit` in
   `ProllyRecordVersioningService`: read the `InProgressCommit` delta, call
   `client.commit(...)` with the branch head's `prollyCommitHash` as parent, then
   write the catalog commit stub (provenance + `prollyCommitHash`, no revision
@@ -169,26 +220,71 @@ existing catalog test suite stays green.
   (`DifferenceManager`, commit-history REST, rebase) and confirm each either
   never runs for a stub or is routed in Step 8 — a stub that breaks an
   unrouted revision-walk is this plan's biggest correctness risk.
-- [ ] **Step 7.** Mirror branch lifecycle: record-service/branch operations on a
+
+  (Landed 2026-08-12 — **as a dual write, refining D-4**: the base catalog
+  commit flow runs unchanged (revision graphs and all) and the delta is
+  mirrored into prolly, linked by `prollyCommitHash` + `ProllyCommit` type.
+  The open check therefore resolves to "nothing breaks": every revision-walk
+  still finds its graphs; the D-4 thin stub (dropping catalog deltas) is
+  deferred to a follow-on gated on Phase 4. Two behaviors the tests pin:
+  a root commit mirrors the post-commit HEAD graph (the base flow ignores the
+  initial InProgressCommit delta — the Step-0 harness correction resurfacing),
+  and a missing repo key or unmirrored parent skips the mirror with a warning
+  rather than corrupting the chain. Driven through the REAL catalog managers
+  in tests, not mocks.)
+- [x] **Step 7.** Mirror branch lifecycle: record-service/branch operations on a
   prolly record call `createBranch`/`deleteBranch`/`setBranchHead` so prolly's
   reachability (and therefore its GC) tracks Mobi's branch heads. Tests: branch
   create/delete/head-advance against the fake; deleting a branch leases its
   detached head for the deletion window (D-8).
 
+  (Landed 2026-08-12: `setBranchHead` mirrors after every commit
+  (prolly branch named by `ProllyRepoKeys.forBranch` slug); `deleteBranch`
+  override removes the prolly pointer best-effort. Corrections: the
+  deletion-window lease is NOT implemented — the fake has no GC, so it would
+  be untestable ceremony; it moves to Phase 5 where a real server can reclaim.
+  `addBranchCommit` mirroring shares `prepareMirror`/`applyMirror` with the
+  master path; its dedicated branch-fork test is deferred to the merge tests
+  in Step 9 which exercise the same path. Module suite 21/21.)
+
 ## Phase 4 — Read path (snapshot instead of replay)
 
-- [ ] **Step 8.** Route reads in `SimpleCompiledResourceManager`: when the
+- [x] **Step 8.** Route reads in `SimpleCompiledResourceManager`: when the
   commit carries `prollyCommitHash`, resolve the record's `prollyRepoKey` and
   stream `client.snapshot(...)` into the returned `Model`; otherwise the
   existing replay (D-5). Extend `DifferenceManager` the same way for
   prolly-stub commit pairs via `client.diff`. Tests: both routes, plus a mixed
   catalog (plain + prolly records) proving zero behavior change for plain
   records.
-- [ ] **Step 9.** Merge: for prolly records, fetch `getMergeBase` + both
+
+  (Landed 2026-08-12, with one architectural correction to D-5: catalog.impl
+  must not depend on prolly modules, so the routing is an *extension point* —
+  `CommitSnapshotResolver` in catalog.api, consulted by
+  `SimpleCompiledResourceManager.buildCompiledResource` (optional/dynamic/
+  multiple DS reference) before replaying; `ProllySnapshotResolver` in
+  prolly.record.impl answers only for commits carrying `prollyCommitHash`
+  (the repo key rides on the stub so no record lookup is needed) and falls
+  back to replay on any client failure. The `DifferenceManager` extension is
+  NOT needed under the Step-6 dual write — revision graphs still exist; it
+  returns with the thin-stub follow-on. Verified: snapshot route isomorphic
+  to replay on the same history, and the full catalog.impl suite green —
+  567/567 — proving zero behavior change for plain records.)
+- [x] **Step 9.** Merge: for prolly records, fetch `getMergeBase` + both
   snapshots, run Mobi's existing blank-node-correct merge, write the
   multi-parent commit via `client.commit` bracketed by a snapshot lease until
   the target head moves (D-8). Test: conflict and non-conflict merges against
   the fake, lease acquired/released asserted.
+
+  (Landed 2026-08-12: `mergeIntoMaster`/`mergeIntoBranch` overrides let the
+  base compute the blank-node-correct merge, then mirror a two-parent prolly
+  commit whose state is diffed against the first parent's snapshot —
+  master-merge state from the HEAD graph, branch-merge state from the
+  compiled resource at the merge commit — bracketed by an
+  acquire/release snapshot lease. Test drives the real base merge flow:
+  both parents verified as ancestors, snapshot == post-merge HEAD state,
+  branch pointer moved, no leases left. The conflict-map merge variant is
+  exercised only with empty conflict resolutions — a conflicting-merge case
+  is future coverage. Module suite 23/23.)
 
 ## Phase 5 — Live integration (gated on grpc-prolly-versioning-client Phases 1–2)
 

@@ -1,0 +1,43 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>.
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>.
+@prefix owl: <http://www.w3.org/2002/07/owl#>.
+@prefix foaf: <http://xmlns.com/foaf/0.1/>.
+@prefix dct: <http://purl.org/dc/terms/>.
+@prefix mcat: <http://mobi.com/ontologies/catalog#>.
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#>.
+@prefix : <http://mobi.com/ontologies/prolly-record#>.
+@base <http://mobi.com/ontologies/prolly-record>.
+
+<http://mobi.com/ontologies/prolly-record> a owl:Ontology;
+    owl:versionIRI <http://mobi.com/ontologies/prolly-record#1.0>;
+    owl:imports <http://mobi.com/ontologies/catalog>;
+    rdfs:label "The Mobi Prolly Record Ontology"@en;
+    rdfs:comment "Describes VersionedRDFRecords whose versioned content is stored in an out-of-process prolly-rdf4j repository, and the thin catalog commit stubs that reference prolly commits."@en;
+    foaf:maker [foaf:name "Mobi"; foaf:homepage <http://mobi.com>];
+    dct:modified "2026-08-12"^^xsd:date.
+
+# ProllyVersionedRDFRecord
+
+:ProllyVersionedRDFRecord a owl:Class;
+    rdfs:subClassOf mcat:VersionedRDFRecord;
+    rdfs:label "Prolly Versioned RDF Record"@en;
+    rdfs:comment "A VersionedRDFRecord whose versioned content lives in a prolly-rdf4j repository; the catalog holds only record, branch, and commit metadata."@en.
+
+:prollyRepoKey a owl:DatatypeProperty, owl:FunctionalProperty;
+    rdfs:label "Prolly repository key"@en;
+    rdfs:comment "The prolly repository this record's content lives in — a deterministic slug of the record IRI, valid per prolly's repo-name rules."@en;
+    rdfs:domain :ProllyVersionedRDFRecord;
+    rdfs:range xsd:string.
+
+# ProllyCommit — the thin catalog stub
+
+:ProllyCommit a owl:Class;
+    rdfs:subClassOf mcat:Commit;
+    rdfs:label "Prolly Commit"@en;
+    rdfs:comment "A catalog commit stub for a prolly-backed record: provenance metadata only, no additions/deletions revision graphs; the content delta lives in the referenced prolly commit."@en.
+
+:prollyCommitHash a owl:DatatypeProperty, owl:FunctionalProperty;
+    rdfs:label "Prolly commit hash"@en;
+    rdfs:comment "The content-addressed hash of the prolly commit holding this commit's graph state, hex-encoded."@en;
+    rdfs:domain :ProllyCommit;
+    rdfs:range xsd:string.

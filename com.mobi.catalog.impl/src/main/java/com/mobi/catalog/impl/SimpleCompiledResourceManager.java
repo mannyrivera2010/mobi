@@ -149,6 +149,11 @@ public class SimpleCompiledResourceManager implements CompiledResourceManager {
     @Reference
     CommitFactory commitFactory;
 
+    @Reference(cardinality = org.osgi.service.component.annotations.ReferenceCardinality.MULTIPLE,
+            policy = org.osgi.service.component.annotations.ReferencePolicy.DYNAMIC)
+    volatile List<com.mobi.catalog.api.CommitSnapshotResolver> snapshotResolvers =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
     @Override
     public Model getCompiledResource(Resource commitId, RepositoryConnection conn, Resource... entityIds) {
         thingManager.validateResource(commitId, commitFactory.getTypeIRI(), conn);
@@ -196,6 +201,19 @@ public class SimpleCompiledResourceManager implements CompiledResourceManager {
 
     private void buildCompiledResource(Resource commitId, Consumer<Statement> consumer, RepositoryConnection conn,
                                        Resource... subjectIds) {
+        // Snapshot-capable backends (e.g. prolly-backed records) answer directly; the first
+        // non-empty answer replaces the revision-chain replay below. Resolvers return empty for
+        // commits they do not own, so plain records always fall through to the replay.
+        for (com.mobi.catalog.api.CommitSnapshotResolver resolver : snapshotResolvers) {
+            java.util.Optional<Model> snapshot = resolver.snapshot(commitId, conn);
+            if (snapshot.isPresent()) {
+                java.util.Set<Resource> subjects = new java.util.HashSet<>(java.util.Arrays.asList(subjectIds));
+                snapshot.get().stream()
+                        .filter(st -> subjects.isEmpty() || subjects.contains(st.getSubject()))
+                        .forEach(consumer);
+                return;
+            }
+        }
         RevisionChain revisionChain = revisionManager.getRevisionChain(commitId, conn);
         List<Resource> fullIRIs = revisionChain.fullIRIs();
         List<Resource> reverseIRIs = revisionChain.reverseIRIs();
