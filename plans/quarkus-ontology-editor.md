@@ -229,11 +229,11 @@ asked to review" are one component.
 ## Where this lives
 
 - Greenfield — no Mobi module is touched. The repository exists as of
-  2026-08-13: `~/git/quarkus-ontology-editor` (README, docs/design.md, founding
+  2026-08-13: `~/git/quarkus-ontology-editor` (README, a design doc, founding
   ADRs 0001/0002), deliberately self-contained — its docs carry the concepts
-  from this plan but reference no Mobi code. That repo's design.md is now the
-  canonical copy of this design; this plan remains the Mobi-side record of why
-  it exists and what it borrows.
+  from this plan but reference no Mobi code. The design document in that repo
+  is now the canonical copy of this design; this plan remains the Mobi-side
+  record of why it exists and what it borrows.
 - What it learns from: `com.mobi.ontology.utils/src/main/java/com/mobi/ontology/utils/cache/repository/OntologyDatasets.java`,
   `com.mobi.ontology.utils/src/main/java/com/mobi/ontology/utils/imports/impl/ImportsResolverImpl.java`
   (the closure machinery D-1 replaces), and this branch's prolly integration
