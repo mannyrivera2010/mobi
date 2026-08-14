@@ -131,6 +131,44 @@ re-opening any historical commit reproduces its exact closure (pinned imports).
     permalink: /repos/acme/clinical-ontology/at/63bbfbb9…/class/Specimen
 ```
 
+## The versioned editor surface (what the Ontology tab contains)
+
+Baseline to beat: Mobi's editor ships Project, Overview, Classes, Properties,
+Individuals, Schemes/Concepts (vocabulary-conditional), Search, and
+Visualization tabs
+(`com.mobi.web/src/main/resources/public/app/ontology-editor/components/ontologyTab/ontologyTab.component.html:27-57`),
+with axiom/characteristics/annotation blocks and per-entity-kind create
+overlays. The redesign keeps that proven information architecture and makes
+**every view a pure function of a ref** (branch, tag, or commit hash) — the
+version axis is not a separate tab, it is a dimension of all of them.
+
+| Workspace | What it shows | What versioning adds |
+|---|---|---|
+| **Overview** | Ontology header (IRI, versionIRI, annotations, license), entity counts, direct imports | Metrics *deltas* between any two refs ("this release: +40 classes, −2 properties"); header history |
+| **Classes** | `subClassOf` tree; class page: equivalent/disjoint axioms, restrictions, annotations, instances, usages | Per-class history, per-axiom blame, class-scoped diff vs any ref, hash permalink |
+| **Object Properties** | `subPropertyOf` tree; domain/range, characteristics (Functional, InverseFunctional, Transitive, Symmetric, Asymmetric, (Ir)Reflexive), inverses, chains | Same per-entity mechanics; characteristic changes are high-risk edits — blame matters most here |
+| **Data Properties** | Hierarchy, domain, range datatypes, Functional | Same |
+| **Annotation Properties** | List + usage counts across the closure | Same |
+| **Individuals** | Browse by class; type/property assertions, same/differentAs | Same |
+| **Datatypes** | Custom datatype definitions | Same |
+| **Concepts / Schemes** *(vocabulary mode, shown when SKOS content exists — Mobi's `isVocab` precedent)* | broader/narrower tree, scheme membership | Same |
+| **Imports** | The **pinned closure** as a tree: direct + transitive members, each with repo + hash + drift status against its latest library fetch | Update-a-pin is an ordinary change → reviewed as an MR; closure reproducible at every historical commit (D-6) |
+| **Search** | Entity finder + text search across the whole closure | Search runs *at the ref* — finding what an entity looked like two releases ago is the same search |
+| **Query** | SPARQL editor over the closure sail (D-1); saved queries | Saved queries live in a reserved graph — **versioned with the ontology**, branchable, reviewable in MRs; results are cacheable by (query, closure-hash) |
+| **Visualization** | Neighborhood graph view | At-ref rendering; diff overlay (added/removed edges between refs) — late phase |
+
+**Every entity page has the same anatomy**, regardless of kind: header (IRI,
+labels, copy-permalink-at-hash) → kind-specific axiom blocks → annotations →
+usages across the closure (cheap under D-1: one union-sail lookup) → a
+**history strip** of commits touching this entity (the engine's log filtered by
+subject — Mobi's `CommitManager.getCommitEntityChain` is the precedent that
+this is the right granularity) → a blame toggle per axiom (provenance
+capability flag, D-3) → a compare-to-ref selector. Every edit affordance
+(create overlays, restriction builder, characteristic toggles) writes a staged
+delta grouped by entity — the Changes tab and MR review render the *same*
+entity-grouped axiom diff, so "what am I about to commit" and "what am I being
+asked to review" are one component.
+
 ## Phase 1 — Engine spike (prove D-1/D-2 in a week, not a quarter)
 
 - [ ] **Step 1.** A Quarkus app embedding prolly-rdf4j: create repo, commit,
@@ -149,19 +187,34 @@ re-opening any historical commit reproduces its exact closure (pinned imports).
   ingestion for web imports (D-6), closure resolution = read pins, never fetch
   at query time; re-fetch endpoint creates a new library commit + diff view.
 
-## Phase 3 — Merge requests on the repo page
+## Phase 3 — The entity workspaces
 
-- [ ] **Step 6.** MR CRUD over prolly's MR backend; repo-page tab with list +
-  detail; axiom-level diff rendering grouped by entity.
-- [ ] **Step 7.** Merge: blank-node-correct merge service (D-5) writing the
+- [ ] **Step 6.** Classes + object/data property workspaces: hierarchy trees,
+  entity pages with kind-specific axiom blocks, closure-wide usages; edits as
+  staged entity-grouped deltas.
+- [ ] **Step 7.** The long tail of kinds: annotation properties, individuals,
+  datatypes; vocabulary mode (concepts/schemes) shown when SKOS content
+  exists.
+- [ ] **Step 8.** The version dimension on every page: entity history strip
+  (log filtered by subject), compare-to-ref entity diff, per-axiom blame
+  behind the provenance capability flag.
+- [ ] **Step 9.** Search at ref across the closure; SPARQL Query tab over the
+  closure sail, saved queries in a reserved (versioned) graph.
+
+## Phase 4 — Merge requests on the repo page
+
+- [ ] **Step 10.** MR CRUD over prolly's MR backend; repo-page tab with list +
+  detail; axiom-level diff rendering grouped by entity (the same component as
+  the Changes tab).
+- [ ] **Step 11.** Merge: blank-node-correct merge service (D-5) writing the
   two-parent commit; conflict surface for the structural cases the engine
   reports; discussion threads.
 
-## Phase 4 — Product hardening
+## Phase 5 — Product hardening
 
-- [ ] **Step 8.** OIDC auth + per-repo roles; SSE live updates; per-axiom
-  blame behind the provenance capability flag; packaging (fast-jar +
-  container) and an operator runbook.
+- [ ] **Step 12.** OIDC auth + per-repo roles; SSE live updates; visualization
+  view with diff overlay; packaging (fast-jar + container) and an operator
+  runbook.
 
 ## Out of scope
 
