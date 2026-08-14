@@ -88,6 +88,7 @@ correction in the wrap-up so the plan's evolution stays visible.
 | [grpc-prolly-versioning-client](grpc-prolly-versioning-client.md) | proposed | cross-cutting |
 | [prolly-versioned-rdf-record](prolly-versioned-rdf-record.md) | proposed | cross-cutting |
 | [prolly-two-process-production](prolly-two-process-production.md) | proposed | cross-cutting |
+| [quarkus-ontology-editor](quarkus-ontology-editor.md) | proposed | greenfield |
 | [java-25-migration](java-25-migration/README.md) | active | cross-cutting |
 | [ehcache-3.10-lock-lift](ehcache-3.10-lock-lift.md) | complete | cross-cutting |
 | [rdf4j-5-upgrade](rdf4j-5-upgrade.md) | proposed | cross-cutting |
